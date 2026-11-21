@@ -97,81 +97,121 @@ def calculate_deadline(form_id=None, report_date=None, work_start_date=None, **_
     }
 
 
-_WEATHER_CACHE = {}  # date -> (timestamp, raw values); limits calls to the free weather APIs
+_WEATHER_CACHE = {"at": 0.0, "days": {}}  # one 16-day fetch, reused for 1 hour (free APIs have daily limits)
 METNO_UA = "ChantierPilot/2.0 (course project; github.com/erama02-boop/chantierpilot)"
 
 
-def _open_meteo(day):
+def _open_meteo_all():
     url = (
         "https://api.open-meteo.com/v1/forecast?latitude=46.5197&longitude=6.6323"
         "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max"
-        f"&timezone=Europe%2FZurich&start_date={day}&end_date={day}"
+        "&timezone=Europe%2FZurich&forecast_days=16"
     )
     r = requests.get(url, timeout=15)
     j = r.json()
     if not r.ok or j.get("error"):
         raise RuntimeError(j.get("reason", r.status_code))
-    d = j.get("daily", {})
+    d = j["daily"]
+    out = {}
+    for i, iso in enumerate(d["time"]):
+        out[date.fromisoformat(iso)] = {
+            "temp_min_c": d["temperature_2m_min"][i], "temp_max_c": d["temperature_2m_max"][i],
+            "rain_mm": d["precipitation_sum"][i], "wind_max_kmh": d["wind_speed_10m_max"][i],
+            "gusts_max_kmh": d["wind_gusts_10m_max"][i], "source": "Open-Meteo",
+        }
+    return out
 
-    def v(key):
-        return (d.get(key) or [None])[0]
 
-    return {"temp_min_c": v("temperature_2m_min"), "temp_max_c": v("temperature_2m_max"),
-            "rain_mm": v("precipitation_sum"), "wind_max_kmh": v("wind_speed_10m_max"),
-            "gusts_max_kmh": v("wind_gusts_10m_max"), "source": "Open-Meteo"}
-
-
-def _met_norway(day):
-    """Backup: MET Norway locationforecast (free, ~9 days). Aggregated to one local day."""
+def _met_norway_all():
+    """Backup: MET Norway locationforecast (free, ~9 days), aggregated per local day."""
     r = requests.get("https://api.met.no/weatherapi/locationforecast/2.0/complete?lat=46.5197&lon=6.6323",
                      headers={"User-Agent": METNO_UA}, timeout=15)
     r.raise_for_status()
-    temps, winds, gusts, rain1, rain6 = [], [], [], [], []
+    acc = defaultdict(lambda: {"temps": [], "winds": [], "gusts": [], "rain": 0.0})
     for step in r.json()["properties"]["timeseries"]:
         t = datetime.fromisoformat(step["time"].replace("Z", "+00:00")).astimezone(TZ)
-        if t.date() != day:
-            continue
-        det = step["data"]["instant"]["details"]
+        a, det = acc[t.date()], step["data"]["instant"]["details"]
         if det.get("air_temperature") is not None:
-            temps.append(det["air_temperature"])
+            a["temps"].append(det["air_temperature"])
         if det.get("wind_speed") is not None:
-            winds.append(det["wind_speed"] * 3.6)
+            a["winds"].append(det["wind_speed"] * 3.6)
         if det.get("wind_speed_of_gust") is not None:
-            gusts.append(det["wind_speed_of_gust"] * 3.6)
-        n1 = step["data"].get("next_1_hours")
-        n6 = step["data"].get("next_6_hours")
+            a["gusts"].append(det["wind_speed_of_gust"] * 3.6)
+        n1, n6 = step["data"].get("next_1_hours"), step["data"].get("next_6_hours")
         if n1:
-            rain1.append(n1["details"].get("precipitation_amount", 0))
+            a["rain"] += n1["details"].get("precipitation_amount", 0)
         elif n6:
-            rain6.append(n6["details"].get("precipitation_amount", 0))
-            temps += [x for x in (n6["details"].get("air_temperature_min"), n6["details"].get("air_temperature_max")) if x is not None]
-    if not temps:
-        raise RuntimeError("no MET Norway data for this date")
-    rain = sum(rain1) + sum(rain6)
-    return {"temp_min_c": round(min(temps), 1), "temp_max_c": round(max(temps), 1), "rain_mm": round(rain, 1),
-            "wind_max_kmh": round(max(winds), 1) if winds else None,
-            "gusts_max_kmh": round(max(gusts), 1) if gusts else None, "source": "MET Norway"}
+            a["rain"] += n6["details"].get("precipitation_amount", 0)
+            a["temps"] += [x for x in (n6["details"].get("air_temperature_min"), n6["details"].get("air_temperature_max")) if x is not None]
+    out = {}
+    for day, a in acc.items():
+        if a["temps"]:
+            out[day] = {"temp_min_c": round(min(a["temps"]), 1), "temp_max_c": round(max(a["temps"]), 1),
+                        "rain_mm": round(a["rain"], 1),
+                        "wind_max_kmh": round(max(a["winds"]), 1) if a["winds"] else None,
+                        "gusts_max_kmh": round(max(a["gusts"]), 1) if a["gusts"] else None, "source": "MET Norway"}
+    if not out:
+        raise RuntimeError("no MET Norway data")
+    return out
 
 
-def _forecast(day):
-    hit = _WEATHER_CACHE.get(day)
-    if hit and time.time() - hit[0] < 3600:
-        return hit[1]
+def _forecast_all():
+    if _WEATHER_CACHE["days"] and time.time() - _WEATHER_CACHE["at"] < 3600:
+        return _WEATHER_CACHE["days"]
     errors = []
-    for provider in (_open_meteo, _met_norway):
+    for provider in (_open_meteo_all, _met_norway_all):
         try:
-            data = provider(day)
-            _WEATHER_CACHE[day] = (time.time(), data)
-            return data
+            days = provider()
+            _WEATHER_CACHE.update(at=time.time(), days=days)
+            return days
         except Exception as e:
             errors.append(f"{provider.__name__}: {e}")
             print(f"[ChantierPilot] weather fallback: {errors[-1]}"[:300], flush=True)
     raise RuntimeError("; ".join(errors))
 
 
+# Indicative go / no-go thresholds per activity (NOT legal limits; manufacturer limits and the
+# site safety plan always win). Each rule: (field, operator, value, verdict, reason).
+WIND = "wind_or_gust_kmh"
+RULES = {
+    "crane":       [(WIND, ">=", 50, "NO-GO", "wind/gusts at or above 50 km/h"), (WIND, ">=", 35, "CAUTION", "wind/gusts at or above 35 km/h")],
+    "concrete":    [("temp_min_c", "<", 0, "NO-GO", "frost (min below 0 °C)"), ("rain_mm", ">=", 10, "NO-GO", "heavy rain (10 mm or more)"),
+                    ("temp_min_c", "<", 5, "CAUTION", "cold (min below 5 °C): cold-weather measures"), ("rain_mm", ">=", 2, "CAUTION", "rain (2 mm or more): cover fresh concrete"),
+                    ("temp_max_c", ">=", 30, "CAUTION", "heat (30 °C or more): fast setting")],
+    "roofing":     [("rain_mm", ">=", 5, "NO-GO", "rain (5 mm or more)"), (WIND, ">=", 50, "NO-GO", "wind/gusts at or above 50 km/h"),
+                    ("temp_min_c", "<=", 0, "CAUTION", "frost: icy surfaces"), ("rain_mm", ">=", 1, "CAUTION", "some rain"),
+                    (WIND, ">=", 35, "CAUTION", "wind/gusts at or above 35 km/h")],
+    "scaffolding": [(WIND, ">=", 60, "NO-GO", "wind/gusts at or above 60 km/h"), (WIND, ">=", 40, "CAUTION", "wind/gusts at or above 40 km/h"),
+                    ("temp_min_c", "<=", 0, "CAUTION", "frost: icy platforms")],
+    "excavation":  [("rain_mm", ">=", 20, "NO-GO", "very heavy rain (20 mm or more)"), ("rain_mm", ">=", 10, "CAUTION", "heavy rain: drainage and trench stability"),
+                    ("temp_min_c", "<=", 0, "CAUTION", "frozen ground")],
+    "facade":      [("rain_mm", ">=", 1, "NO-GO", "rain (painting/rendering needs dry weather)"), ("temp_min_c", "<", 5, "CAUTION", "cold (below 5 °C): check product limits"),
+                    (WIND, ">=", 40, "CAUTION", "wind/gusts at or above 40 km/h")],
+    "general":     [(WIND, ">=", 75, "NO-GO", "storm (wind/gusts 75 km/h or more)"), ("rain_mm", ">=", 10, "CAUTION", "heavy rain"),
+                    (WIND, ">=", 50, "CAUTION", "strong wind"), ("temp_min_c", "<=", -5, "CAUTION", "severe cold"), ("temp_max_c", ">=", 32, "CAUTION", "heat")],
+}
+_OPS = {">=": lambda a, b: a >= b, "<": lambda a, b: a < b, "<=": lambda a, b: a <= b}
+_RANK = {"GO": 0, "CAUTION": 1, "NO-GO": 2}
+
+
+def _verdict(values, activity):
+    v = dict(values)
+    g, w = v.get("gusts_max_kmh"), v.get("wind_max_kmh")
+    v[WIND] = max(x for x in (g, w, 0) if x is not None)
+    verdict, reasons, hit_fields = "GO", [], set()
+    for field, op, limit, level, reason in RULES[activity]:  # rules are listed NO-GO first
+        x = v.get(field)
+        if x is not None and _OPS[op](x, limit) and not (level == "CAUTION" and (field, op) in hit_fields):
+            hit_fields.add((field, op))
+            reasons.append(f"{level}: {reason}")
+            if _RANK[level] > _RANK[verdict]:
+                verdict = level
+    return verdict, reasons
+
+
 def get_site_weather(date=None, activity="general", **_ignored):
-    """Live Lausanne forecast for one day (Open-Meteo, backup MET Norway; free, no key) + indicative flags."""
-    activity = activity or "general"
+    """Weather go/no-go for one planned outdoor task in Lausanne (Open-Meteo, backup MET Norway)."""
+    activity = activity if activity in RULES else "general"
     day = _parse_date(date)
     if day is None:
         return {"error": "date is missing or not a valid date (YYYY-MM-DD)."}
@@ -181,29 +221,21 @@ def get_site_weather(date=None, activity="general", **_ignored):
     if day > today + timedelta(days=15):
         return {"date": day.isoformat(), "error": "Forecasts only cover the next 16 days. Check again closer to the date (e.g. MeteoSwiss)."}
     try:
-        raw = _forecast(day)
+        days = _forecast_all()
     except Exception:
         return {"date": day.isoformat(), "error": "Weather service not reachable right now. Check the forecast manually (e.g. MeteoSwiss)."}
-    w = {"date": day.isoformat(), "activity": activity, "location": "Lausanne", **raw}
-    if w["temp_min_c"] is None and w["wind_max_kmh"] is None:
-        return {"date": day.isoformat(), "error": "Weather service returned no data for this date."}
-    flags, tmin, tmax, rain = [], w["temp_min_c"], w["temp_max_c"], w["rain_mm"]
-    g = w["gusts_max_kmh"] if w["gusts_max_kmh"] is not None else w["wind_max_kmh"]
-    if g is not None and g >= 50:
-        flags.append(f"Strong wind/gusts ({g} km/h): check the wind limits of cranes and work at height before starting")
-    elif g is not None and g >= 35 and activity in ("crane", "roofing", "scaffolding"):
-        flags.append(f"Moderate wind/gusts ({g} km/h): monitor wind during lifting / work at height")
-    if tmin is not None and tmin < 5:
-        flags.append(f"Cold (min {tmin} °C): concrete may need cold-weather measures (heating, covers)")
-    if tmin is not None and tmin <= 0:
-        flags.append(f"Frost risk (min {tmin} °C): slippery surfaces, protect fresh concrete")
-    if rain is not None and rain >= 5:
-        flags.append(f"Rain ({rain} mm): plan protection for concrete, roofing and excavations")
-    if tmax is not None and tmax >= 30:
-        flags.append(f"Heat (max {tmax} °C): hydration breaks, fast concrete setting")
-    w["flags"] = flags or ["No weather concerns flagged"]
-    w["note"] = "Indicative thresholds only, not legal limits. The equipment manufacturer's limits and the site's safety plan always apply."
-    return w
+    if day not in days:
+        return {"date": day.isoformat(), "error": "No forecast for this date yet (the backup service covers about 9 days). Check MeteoSwiss closer to the date."}
+    verdict, reasons = _verdict(days[day], activity)
+    result = {"date": day.isoformat(), "activity": activity, "location": "Lausanne", **days[day],
+              "verdict": verdict, "reasons": reasons or ["No weather limits reached for this activity"]}
+    if verdict != "GO":
+        later = sorted(d for d in days if d > day)
+        result["next_go_day"] = next((d.isoformat() for d in later if _verdict(days[d], activity)[0] == "GO"), None) \
+            or "No GO day in the available forecast"
+    result["note"] = ("Indicative thresholds only, not legal limits. The equipment manufacturer's limits and the "
+                      "site's safety plan always apply. Re-check the forecast the day before.")
+    return result
 
 
 TOOLS = {"calculate_deadline": calculate_deadline, "get_site_weather": get_site_weather}
@@ -229,9 +261,11 @@ TOOL_DECLARATIONS = [
     {
         "name": "get_site_weather",
         "description": (
-            "Gets the live weather forecast for Lausanne for one day (up to 16 days ahead): min/max temperature, "
-            "rain, max wind and max gusts, plus indicative flags. Call it for each day on which the note plans "
-            "outdoor work (crane, concrete pour, roofing, scaffolding, excavation, facade work)."
+            "Checks whether a planned outdoor task in Lausanne can go ahead on a given day (up to 16 days ahead). "
+            "Returns the forecast (min/max temperature, rain, wind, gusts), a verdict GO / CAUTION / NO-GO for that "
+            "activity with the reasons, and, if not GO, the next day in the forecast that is GO. Call it once for each "
+            "day on which the note plans outdoor work (crane lift, concrete pour, roofing, scaffolding, excavation, "
+            "facade painting/rendering), or when the user asks whether a task can be done on a given day."
         ),
         "parameters": {
             "type": "object",
@@ -239,7 +273,7 @@ TOOL_DECLARATIONS = [
                 "date": {"type": "string", "description": "Day of the planned work, format YYYY-MM-DD (e.g. 'tomorrow' = report date + 1 day)"},
                 "activity": {
                     "type": "string",
-                    "enum": ["crane", "concrete", "roofing", "scaffolding", "excavation", "general"],
+                    "enum": ["crane", "concrete", "roofing", "scaffolding", "excavation", "facade", "general"],
                     "description": "Main outdoor activity planned that day",
                 },
             },
@@ -286,7 +320,10 @@ def call_gemini(contents, models):
                 print(f"[ChantierPilot] Gemini refused the request ({r.status_code}): {last_err}", flush=True)
                 raise RuntimeError("The service is not configured correctly (API key). Please tell the maintainers.")
         if attempt == 0:
-            time.sleep(4)
+            # Free-tier quota (HTTP 429) is per minute: wait longer before the second round.
+            time.sleep(20 if "429" in str(last_err) or "quota" in str(last_err).lower() else 4)
+    if "quota" in str(last_err).lower():
+        raise RuntimeError("The free AI quota is used up for the moment. Please wait about a minute and try again.")
     raise RuntimeError("All models are busy or unavailable right now. Try again in a few minutes.")
 
 
