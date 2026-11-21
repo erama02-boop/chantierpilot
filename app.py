@@ -27,9 +27,10 @@ import requests
 
 # ---------------------------------------------------------------- configuration
 API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-# Stable full model first: the "-latest" aliases were overloaded (45 s timeouts / HTTP 503) in testing,
-# and the lite models skip tools and the language rule more often (revision log #9).
-MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-flash-lite-latest"]
+# Model order (revision log #9): Google retired gemini-2.5-* for new keys (HTTP 404, recommending
+# gemini-3.8-flash / gemini-3.5-flash-lite), and the "-latest" aliases were overloaded (timeouts / HTTP 503).
+# Full model first: the lite models skip tools and the language rule more often.
+MODELS = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
 INSTRUCTIONS = (Path(__file__).parent / "instructions.md").read_text(encoding="utf-8")
 MAX_NOTE_CHARS = 5000          # longer notes are refused
 MAX_TOOL_ROUNDS = 8            # same limit as v1
