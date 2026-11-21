@@ -1,0 +1,61 @@
+---
+title: ChantierPilot
+emoji: 🏗️
+colorFrom: yellow
+colorTo: gray
+sdk: gradio
+sdk_version: 6.32.0
+app_file: app.py
+pinned: false
+short_description: Site report and permits assistant for Lausanne
+---
+
+# ChantierPilot
+
+**Site report and permits assistant for construction sites in the City of Lausanne.**
+Course project – Applied AI and Deep Learning for Managers (HEC Lausanne, 2026–2027).
+
+> ⚠️ Demo for a university course. Not legal advice. Use fictional notes only.
+
+## Who it is for
+Site managers (chefs de chantier) of small and mid-sized construction companies in Lausanne. At the end of the day they write or dictate a short note. ChantierPilot turns it into:
+
+1. a **safety alert** (injury, accident or suspected asbestos), when needed;
+2. a structured **daily log** (missing items marked "not mentioned");
+3. a **compliance table**: which City of Lausanne, Canton of Vaud or Suva forms the note triggers, with the deadline and how to submit;
+4. a **weather check** for planned outdoor work (crane, concrete, roofing…);
+5. **pre-filled form drafts** and the questions needed to complete them.
+
+It answers in the language of the note (FR, EN, DE, IT, PT, ES…); official form names stay in French.
+
+## How it works
+| Component | Choice |
+|---|---|
+| Model | Google Gemini (Flash family, automatic fallback between 4 models), temperature 0.2 |
+| Instructions | `instructions.md` (role, steps, output format, rules, security rule) |
+| Knowledge | Form Library v2 (F01–F12), **injected into the context** (no retrieval) |
+| Tool 1 | `calculate_deadline` – deterministic date arithmetic; notice period looked up per form |
+| Tool 2 | `get_site_weather` – live Open-Meteo forecast for Lausanne + indicative flags |
+| Interface | Gradio; report downloadable as Markdown |
+
+**Why context injection and not RAG:** the whole library is 12 short entries (~25 KB). It fits easily in the context window, so the model always sees every form. Retrieval would add a failure mode (missing the right form) without any benefit at this size. We would switch to retrieval if the library grew to hundreds of regulations.
+
+**Why Gemini and not Mistral (the course reference platform):** Gemini's free tier and function calling worked reliably from a plain web page during development, and the course allows any platform that meets the requirements. The architecture (instructions + context knowledge + custom function tools) is the same as a Mistral Agent with function calling.
+
+## Limits
+- Covers only the City of Lausanne (+ Vaud and Suva obligations there). Other communes get the daily log only.
+- F10 (complementary building permit) threshold and the noise-hours part of F12 are marked **TO VERIFY**; the app says so when it flags them.
+- Weather thresholds are indicative, not legal limits. Forecasts cover 16 days.
+- The model can still misread a note: the site manager reviews every draft; the app never submits anything.
+
+## Security
+- The Gemini key is stored as a Space **secret** (`GEMINI_API_KEY`) and used only on the server.
+- The note is passed as data inside `<site_note>` tags; instructions inside the note are ignored.
+- Notes are capped at 5,000 characters; 10 reports per visitor per hour.
+
+## Run locally
+```bash
+pip install -r requirements.txt
+export GEMINI_API_KEY=...   # never commit the key
+python app.py
+```
