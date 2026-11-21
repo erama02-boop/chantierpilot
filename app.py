@@ -13,6 +13,7 @@ What changed from v1 (index.html):
 """
 
 import json
+import re
 import os
 import tempfile
 import time
@@ -30,7 +31,7 @@ MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash",
 INSTRUCTIONS = (Path(__file__).parent / "instructions.md").read_text(encoding="utf-8")
 MAX_NOTE_CHARS = 5000          # longer notes are refused
 MAX_TOOL_ROUNDS = 8            # same limit as v1
-RATE_LIMIT = (10, 3600)        # 10 reports per visitor per hour
+RATE_LIMIT = (int(os.environ.get("RATE_LIMIT_PER_HOUR", "30")), 3600)  # reports per visitor per hour
 TIMEOUT_S = 45
 TZ = ZoneInfo("Europe/Zurich")
 
@@ -38,6 +39,14 @@ TZ = ZoneInfo("Europe/Zurich")
 # the model no longer chooses this number.
 NOTICE_DAYS = {"F01": 2, "F02": 10, "F05": 14, "F08": 14}
 KNOWN_FORMS = {f"F{i:02d}" for i in range(1, 13)}
+
+NUDGE = (
+    "Check before finishing: your answer flags forms but you did not call calculate_deadline. "
+    "Call it now for every flagged form that has a start, felling, removal or occupation date "
+    "(estimate the earliest date if vague). Then rewrite your COMPLETE answer, using exactly the deadline, "
+    "days left and priority the tool returns, in the language of the site note. "
+    "If no flagged form has any date, answer again unchanged."
+)
 
 EXAMPLE = (
     "Chantier Avenue de Cour 48, Lausanne. Démolition de la cuisine au 2e étage terminée. "
@@ -204,14 +213,17 @@ def call_gemini(contents, models):
                 j = r.json()
             except requests.Timeout:
                 last_err = f"{m}: no answer after {TIMEOUT_S} s (model overloaded)"
+                print(f"[ChantierPilot] fallback: {last_err}")
                 continue
             except Exception as e:  # network problems, invalid JSON
                 last_err = f"{m}: {type(e).__name__}"
+                print(f"[ChantierPilot] fallback: {last_err}")
                 continue
             cands = j.get("candidates") or []
             if r.ok and cands and cands[0].get("content"):
                 return j, m
             last_err = (j.get("error") or {}).get("message") or f"HTTP {r.status_code}"
+            print(f"[ChantierPilot] fallback: {m} -> HTTP {r.status_code}: {str(last_err)[:300]}")
             if r.status_code in (400, 401, 403):
                 # Do not show Google's raw message to visitors; log it for the maintainer.
                 print(f"[ChantierPilot] Gemini refused the request ({r.status_code}): {last_err}")
@@ -258,12 +270,17 @@ def generate(note, report_date, request: gr.Request = None):
     fwd = (getattr(request, "headers", None) or {}).get("x-forwarded-for", "") if request else ""
     visitor = fwd.split(",")[0].strip() or getattr(getattr(request, "client", None), "host", None) or "anonymous"
     if not _allowed(visitor):
-        return "⏳ Rate limit reached (10 reports per hour). Please try again later.", gr.update(visible=False)
+        return f"⏳ Rate limit reached ({RATE_LIMIT[0]} reports per hour). Please try again later.", gr.update(visible=False)
 
     # The note is wrapped and labelled as data (see the Security rule in instructions.md).
-    user_text = f"Date du rapport : {report_date}\n\n<site_note>\n{note}\n</site_note>"
+    # The date line is in English on purpose: the answer language must follow the note, not this line.
+    user_text = (
+        f"Report date: {report_date}\n"
+        "Answer in the language of the text inside <site_note> (not the language of these two lines).\n\n"
+        f"<site_note>\n{note}\n</site_note>"
+    )
     contents = [{"role": "user", "parts": [{"text": user_text}]}]
-    tool_log, models = [], MODELS
+    tool_log, models, nudged = [], MODELS, False
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             j, m = call_gemini(contents, models)
@@ -273,6 +290,15 @@ def generate(note, report_date, request: gr.Request = None):
             calls = [p["functionCall"] for p in parts if "functionCall" in p]
             if not calls:
                 text = "\n\n".join(p["text"] for p in parts if p.get("text") and not p.get("thought")).strip()
+                # Guard (revision log #7): forms flagged but deadlines never computed by the tool ->
+                # send the model back once to call calculate_deadline instead of guessing dates/priorities.
+                flagged = re.search(r"\bF(0[1-9]|1[0-2])\b", text or "")
+                used_deadline_tool = any(t["name"] == "calculate_deadline" for t in tool_log)
+                if flagged and not used_deadline_tool and not nudged:
+                    nudged = True
+                    contents.append(content)
+                    contents.append({"role": "user", "parts": [{"text": NUDGE}]})
+                    continue
                 md = (text or "❌ Empty answer. Try again.") + f"\n\n---\n*Model: {m}*"
                 md += f"\n\n<details><summary>🔧 Tool calls ({len(tool_log)})</summary>\n\n"
                 md += "\n".join(
