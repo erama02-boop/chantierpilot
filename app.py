@@ -44,11 +44,10 @@ NOTICE_DAYS = {"F01": 2, "F02": 10, "F05": 14, "F08": 14}
 KNOWN_FORMS = {f"F{i:02d}" for i in range(1, 13)}
 
 NUDGE = (
-    "Check before finishing: your answer flags forms but you did not call calculate_deadline. "
-    "Call it now for every flagged form that has a start, felling, removal or occupation date "
-    "(estimate the earliest date if vague). Then rewrite your COMPLETE answer, using exactly the deadline, "
-    "days left and priority the tool returns, in the language of the site note. "
-    "If no flagged form has any date, answer again unchanged."
+    "Check before finishing: your answer needs tool results you did not get. Call now: {missing}. "
+    "Estimate the earliest date if a date is vague. Then rewrite your COMPLETE answer using exactly what the tools "
+    "return (deadline, days left, priority, weather verdict and values), in the language of the site note. "
+    "If no date exists for a form, keep 'Date not known yet'."
 )
 
 EXAMPLE = (
@@ -369,6 +368,21 @@ TRIGGERS = {
 }
 
 
+OUTDOOR = {
+    "concrete": ["béton", "beton", "bétonnage", "coulage", "dalle", "concrete", "concrete pour", "calcestruzzo", "concreto", "hormigón"],
+    "crane": ["grue", "levage", "camion-grue", "crane", "lift", "kran", "gru", "guindaste"],
+    "roofing": ["toit", "toiture", "couverture", "roof", "dach", "tetto", "telhado", "tejado"],
+    "scaffolding": ["échafaudage", "echafaudage", "scaffold", "gerüst", "ponteggio", "andaime", "andamio"],
+    "excavation": ["fouille", "terrassement", "excavation", "escavação", "excavación", "aushub", "scavo"],
+    "facade": ["façade", "facade", "crépi", "peinture extérieure", "fassade", "facciata", "fachada"],
+}
+
+
+def outdoor_work(note):
+    text = note.lower()
+    return [act for act, words in OUTDOOR.items() if any(re.search(r"\b" + re.escape(w), text) for w in words)]
+
+
 def candidate_forms(note):
     text = note.lower()
     found = {}
@@ -425,13 +439,19 @@ def generate(note, report_date, request: gr.Request = None):
     # The date line is in English on purpose: the answer language must follow the note, not this line.
     lang = detect_language(note)
     cands = candidate_forms(note)
+    outdoor = outdoor_work(note)
     hint = ", ".join(f"{f} (\"{w}\")" for f, w in cands.items()) or "none"
     user_text = (
         f"Report date: {report_date}\n"
         + (f"Answer language: {lang}. Write the whole answer in {lang}.\n" if lang else
            "Answer in the language of the text inside <site_note>.\n")
         + f"Trigger words found by code (candidate forms): {hint}. Flag only these forms, and only if the note "
-          "really matches the form's rule; a form not in this list needs a clear match in the note.\n\n"
+          "really matches the form's rule; a form not in this list needs a clear match in the note.\n"
+        + (f"Outdoor work found by code: {', '.join(outdoor)}. Call get_site_weather for each planned day of this work; "
+           "never write a weather verdict or values without the tool.\n" if outdoor else
+           "No outdoor work found by code: skip the weather section unless the note clearly plans outdoor work.\n")
+        + (f"Translate every section heading and label into {lang}.\n" if lang else "")
+        + "\n"
         + f"<site_note>\n{note}\n</site_note>"
     )
     contents = [{"role": "user", "parts": [{"text": user_text}]}]
@@ -445,14 +465,18 @@ def generate(note, report_date, request: gr.Request = None):
             calls = [p["functionCall"] for p in parts if "functionCall" in p]
             if not calls:
                 text = "\n\n".join(p["text"] for p in parts if p.get("text") and not p.get("thought")).strip()
-                # Guard (revision log #7): forms flagged but deadlines never computed by the tool ->
-                # send the model back once to call calculate_deadline instead of guessing dates/priorities.
-                flagged = re.search(r"\bF(0[1-9]|1[0-2])\b", text or "")
-                used_deadline_tool = any(t["name"] == "calculate_deadline" for t in tool_log)
-                if flagged and not used_deadline_tool and not nudged:
+                # Guards (revision log #7 and #14): never accept deadlines or weather verdicts the tools did not compute.
+                # If the answer needs a tool that was never called, send the model back once to call it.
+                used = {t["name"] for t in tool_log}
+                missing = []
+                if re.search(r"\bF(0[1-9]|1[0-2])\b", text or "") and "calculate_deadline" not in used:
+                    missing.append("calculate_deadline for every flagged form with a start, felling, removal or occupation date")
+                if outdoor and "get_site_weather" not in used:
+                    missing.append("get_site_weather for each planned day of outdoor work (" + ", ".join(outdoor) + ")")
+                if missing and not nudged:
                     nudged = True
                     contents.append(content)
-                    contents.append({"role": "user", "parts": [{"text": NUDGE}]})
+                    contents.append({"role": "user", "parts": [{"text": NUDGE.format(missing="; ".join(missing))}]})
                     continue
                 md = (text or "❌ Empty answer. Try again.") + f"\n\n---\n*Model: {m}*"
                 md += f"\n\n<details><summary>🔧 Tool calls ({len(tool_log)})</summary>\n\n"
