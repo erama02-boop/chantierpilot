@@ -213,20 +213,20 @@ def call_gemini(contents, models):
                 j = r.json()
             except requests.Timeout:
                 last_err = f"{m}: no answer after {TIMEOUT_S} s (model overloaded)"
-                print(f"[ChantierPilot] fallback: {last_err}")
+                print(f"[ChantierPilot] fallback: {last_err}", flush=True)
                 continue
             except Exception as e:  # network problems, invalid JSON
                 last_err = f"{m}: {type(e).__name__}"
-                print(f"[ChantierPilot] fallback: {last_err}")
+                print(f"[ChantierPilot] fallback: {last_err}", flush=True)
                 continue
             cands = j.get("candidates") or []
             if r.ok and cands and cands[0].get("content"):
                 return j, m
             last_err = (j.get("error") or {}).get("message") or f"HTTP {r.status_code}"
-            print(f"[ChantierPilot] fallback: {m} -> HTTP {r.status_code}: {str(last_err)[:300]}")
+            print(f"[ChantierPilot] fallback: {m} -> HTTP {r.status_code}: {str(last_err)[:300]}", flush=True)
             if r.status_code in (400, 401, 403):
                 # Do not show Google's raw message to visitors; log it for the maintainer.
-                print(f"[ChantierPilot] Gemini refused the request ({r.status_code}): {last_err}")
+                print(f"[ChantierPilot] Gemini refused the request ({r.status_code}): {last_err}", flush=True)
                 raise RuntimeError("The service is not configured correctly (API key). Please tell the maintainers.")
         if attempt == 0:
             time.sleep(4)
