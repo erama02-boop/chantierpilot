@@ -327,6 +327,61 @@ def call_gemini(contents, models):
     raise RuntimeError("All models are busy or unavailable right now. Try again in a few minutes.")
 
 
+
+# ---------------------------------------------------------------- deterministic pre-checks (revision log #13)
+# The free-tier lite model sometimes ignores the language rule and the trigger rules, so the code
+# does the parts where the rules are known and hands the model explicit hints.
+_STOP = {
+    "English": "the and of to a in is was on for with will be we at from tomorrow today worker site".split(),
+    "French": "le la les des du de et un une est sur pour avec demain aujourd on chantier travaux pas".split(),
+    "German": "der die das und ist mit auf für ein eine morgen heute baustelle nicht wir".split(),
+    "Italian": "il lo gli della di e un una è con per domani oggi cantiere lavori non".split(),
+    "Portuguese": "o os as da do de e um uma com para amanhã hoje obra vamos não no na".split(),
+    "Spanish": "el los las del de y un una es con para mañana hoy obra vamos no en".split(),
+}
+
+
+def detect_language(note):
+    words = re.findall(r"[a-zàâäçéèêëîïôöùûüñãõœ']+", note.lower())
+    scores = {lang: sum(w in stop for w in words) for lang, stop in _STOP.items()}
+    best = max(scores, key=scores.get)
+    return best if scores[best] >= 2 else None
+
+
+# Trigger words per form (lower-case, accents kept). Matching any of them makes the form a candidate.
+TRIGGERS = {
+    "F01": ["benne", "trottoir", "voie publique", "domaine public", "places de parc", "place de parc", "fermeture de voie",
+            "palissade", "skip on the street", "sidewalk", "pavement", "public road", "parking space", "lane closure"],
+    "F02": ["ouverture du chantier", "ouverture de chantier", "début des travaux", "debut des travaux", "installation de chantier",
+            "site opening", "works start", "first day on site", "new site starting"],
+    "F03": ["abattre", "abattage", "élagage", "elagage", "couper un arbre", "arbre", "cut down a tree", "remove a tree", "fell a tree",
+            "árvore", "albero", "baum", "árbol"],
+    "F05": ["désamiantage", "desamiantage", "asbestos removal", "assainissement amiante"],
+    "F06": ["amiante", "asbestos", "fibrociment", "matériau suspect"],
+    "F07": ["désamiantage terminé", "fin du désamiantage", "asbestos removal finished"],
+    "F08": ["démolition", "demolition", "déconstruction", "deconstruction", "travaux souterrains", "tunnel", "minage", "abattage de roches",
+            "rock blasting", "underground work", "abbruch", "demolição", "demolizione", "demolición"],
+    "F09": ["fin des travaux", "permis d'habiter", "emménagement", "réception de l'ouvrage", "works finished", "handover", "move in"],
+    "F10": ["modification du projet", "changement des plans", "changement d'affectation", "change the plans", "extra floor", "change of use"],
+    "F11": ["accident", "blessé", "blessure", "chute", "ambulance", "hôpital", "hopital", "injured", "fell", "hospital", "cut his", "cut her",
+            "s'est coupé", "verletzt", "ferito", "ferido", "herido"],
+    "F12": ["travaux de nuit", "travail de nuit", "dimanche", "jour férié", "night work", "sunday work", "overnight"],
+}
+
+
+def candidate_forms(note):
+    text = note.lower()
+    found = {}
+    for form, words in TRIGGERS.items():
+        hits = [w for w in words if w in text]
+        if hits:
+            found[form] = hits[0]
+    if "F05" in found:
+        found.pop("F06", None)  # planned removal (F05), not an unexpected discovery (F06)
+    if "F07" in found:
+        found.pop("F05", None)
+    return found
+
 # ---------------------------------------------------------------- rate limit
 _hits = defaultdict(deque)
 
@@ -368,10 +423,16 @@ def generate(note, report_date, request: gr.Request = None):
 
     # The note is wrapped and labelled as data (see the Security rule in instructions.md).
     # The date line is in English on purpose: the answer language must follow the note, not this line.
+    lang = detect_language(note)
+    cands = candidate_forms(note)
+    hint = ", ".join(f"{f} (\"{w}\")" for f, w in cands.items()) or "none"
     user_text = (
         f"Report date: {report_date}\n"
-        "Answer in the language of the text inside <site_note> (not the language of these two lines).\n\n"
-        f"<site_note>\n{note}\n</site_note>"
+        + (f"Answer language: {lang}. Write the whole answer in {lang}.\n" if lang else
+           "Answer in the language of the text inside <site_note>.\n")
+        + f"Trigger words found by code (candidate forms): {hint}. Flag only these forms, and only if the note "
+          "really matches the form's rule; a form not in this list needs a clear match in the note.\n\n"
+        + f"<site_note>\n{note}\n</site_note>"
     )
     contents = [{"role": "user", "parts": [{"text": user_text}]}]
     tool_log, models, nudged = [], MODELS, False
