@@ -27,12 +27,14 @@ import requests
 
 # ---------------------------------------------------------------- configuration
 API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
-MODELS = ["gemini-flash-latest", "gemini-flash-lite-latest", "gemini-2.5-flash", "gemini-2.5-flash-lite"]
+# Stable full model first: the "-latest" aliases were overloaded (45 s timeouts / HTTP 503) in testing,
+# and the lite models skip tools and the language rule more often (revision log #9).
+MODELS = ["gemini-2.5-flash", "gemini-flash-latest", "gemini-2.5-flash-lite", "gemini-flash-lite-latest"]
 INSTRUCTIONS = (Path(__file__).parent / "instructions.md").read_text(encoding="utf-8")
 MAX_NOTE_CHARS = 5000          # longer notes are refused
 MAX_TOOL_ROUNDS = 8            # same limit as v1
 RATE_LIMIT = (int(os.environ.get("RATE_LIMIT_PER_HOUR", "30")), 3600)  # reports per visitor per hour
-TIMEOUT_S = 45
+TIMEOUT_S = 30
 TZ = ZoneInfo("Europe/Zurich")
 
 # Notice periods (calendar days before the start date). Single source of truth:
@@ -94,8 +96,80 @@ def calculate_deadline(form_id=None, report_date=None, work_start_date=None, **_
     }
 
 
+_WEATHER_CACHE = {}  # date -> (timestamp, raw values); limits calls to the free weather APIs
+METNO_UA = "ChantierPilot/2.0 (course project; github.com/erama02-boop/chantierpilot)"
+
+
+def _open_meteo(day):
+    url = (
+        "https://api.open-meteo.com/v1/forecast?latitude=46.5197&longitude=6.6323"
+        "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max"
+        f"&timezone=Europe%2FZurich&start_date={day}&end_date={day}"
+    )
+    r = requests.get(url, timeout=15)
+    j = r.json()
+    if not r.ok or j.get("error"):
+        raise RuntimeError(j.get("reason", r.status_code))
+    d = j.get("daily", {})
+
+    def v(key):
+        return (d.get(key) or [None])[0]
+
+    return {"temp_min_c": v("temperature_2m_min"), "temp_max_c": v("temperature_2m_max"),
+            "rain_mm": v("precipitation_sum"), "wind_max_kmh": v("wind_speed_10m_max"),
+            "gusts_max_kmh": v("wind_gusts_10m_max"), "source": "Open-Meteo"}
+
+
+def _met_norway(day):
+    """Backup: MET Norway locationforecast (free, ~9 days). Aggregated to one local day."""
+    r = requests.get("https://api.met.no/weatherapi/locationforecast/2.0/complete?lat=46.5197&lon=6.6323",
+                     headers={"User-Agent": METNO_UA}, timeout=15)
+    r.raise_for_status()
+    temps, winds, gusts, rain1, rain6 = [], [], [], [], []
+    for step in r.json()["properties"]["timeseries"]:
+        t = datetime.fromisoformat(step["time"].replace("Z", "+00:00")).astimezone(TZ)
+        if t.date() != day:
+            continue
+        det = step["data"]["instant"]["details"]
+        if det.get("air_temperature") is not None:
+            temps.append(det["air_temperature"])
+        if det.get("wind_speed") is not None:
+            winds.append(det["wind_speed"] * 3.6)
+        if det.get("wind_speed_of_gust") is not None:
+            gusts.append(det["wind_speed_of_gust"] * 3.6)
+        n1 = step["data"].get("next_1_hours")
+        n6 = step["data"].get("next_6_hours")
+        if n1:
+            rain1.append(n1["details"].get("precipitation_amount", 0))
+        elif n6:
+            rain6.append(n6["details"].get("precipitation_amount", 0))
+            temps += [x for x in (n6["details"].get("air_temperature_min"), n6["details"].get("air_temperature_max")) if x is not None]
+    if not temps:
+        raise RuntimeError("no MET Norway data for this date")
+    rain = sum(rain1) + sum(rain6)
+    return {"temp_min_c": round(min(temps), 1), "temp_max_c": round(max(temps), 1), "rain_mm": round(rain, 1),
+            "wind_max_kmh": round(max(winds), 1) if winds else None,
+            "gusts_max_kmh": round(max(gusts), 1) if gusts else None, "source": "MET Norway"}
+
+
+def _forecast(day):
+    hit = _WEATHER_CACHE.get(day)
+    if hit and time.time() - hit[0] < 3600:
+        return hit[1]
+    errors = []
+    for provider in (_open_meteo, _met_norway):
+        try:
+            data = provider(day)
+            _WEATHER_CACHE[day] = (time.time(), data)
+            return data
+        except Exception as e:
+            errors.append(f"{provider.__name__}: {e}")
+            print(f"[ChantierPilot] weather fallback: {errors[-1]}"[:300], flush=True)
+    raise RuntimeError("; ".join(errors))
+
+
 def get_site_weather(date=None, activity="general", **_ignored):
-    """Live Lausanne forecast for one day (Open-Meteo, free, no key) + indicative flags."""
+    """Live Lausanne forecast for one day (Open-Meteo, backup MET Norway; free, no key) + indicative flags."""
     activity = activity or "general"
     day = _parse_date(date)
     if day is None:
@@ -105,37 +179,19 @@ def get_site_weather(date=None, activity="general", **_ignored):
         return {"date": day.isoformat(), "error": "This date is in the past, so there is no forecast. Weather is only checked for planned work."}
     if day > today + timedelta(days=15):
         return {"date": day.isoformat(), "error": "Forecasts only cover the next 16 days. Check again closer to the date (e.g. MeteoSwiss)."}
-    url = (
-        "https://api.open-meteo.com/v1/forecast?latitude=46.5197&longitude=6.6323"
-        "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,wind_gusts_10m_max"
-        f"&timezone=Europe%2FZurich&start_date={day}&end_date={day}"
-    )
     try:
-        r = requests.get(url, timeout=15)
-        j = r.json()
+        raw = _forecast(day)
     except Exception:
         return {"date": day.isoformat(), "error": "Weather service not reachable right now. Check the forecast manually (e.g. MeteoSwiss)."}
-    if not r.ok or j.get("error"):
-        return {"date": day.isoformat(), "error": f"Weather not available for this date: {j.get('reason', r.status_code)}"}
-    d = j.get("daily", {})
-
-    def v(key):
-        vals = d.get(key) or [None]
-        return vals[0]
-
-    w = {
-        "date": day.isoformat(), "activity": activity, "location": "Lausanne",
-        "temp_min_c": v("temperature_2m_min"), "temp_max_c": v("temperature_2m_max"),
-        "rain_mm": v("precipitation_sum"),
-        "wind_max_kmh": v("wind_speed_10m_max"), "gusts_max_kmh": v("wind_gusts_10m_max"),
-    }
-    if w["temp_min_c"] is None and w["gusts_max_kmh"] is None:
+    w = {"date": day.isoformat(), "activity": activity, "location": "Lausanne", **raw}
+    if w["temp_min_c"] is None and w["wind_max_kmh"] is None:
         return {"date": day.isoformat(), "error": "Weather service returned no data for this date."}
-    flags, g, tmin, tmax, rain = [], w["gusts_max_kmh"], w["temp_min_c"], w["temp_max_c"], w["rain_mm"]
+    flags, tmin, tmax, rain = [], w["temp_min_c"], w["temp_max_c"], w["rain_mm"]
+    g = w["gusts_max_kmh"] if w["gusts_max_kmh"] is not None else w["wind_max_kmh"]
     if g is not None and g >= 50:
-        flags.append(f"Strong gusts ({g} km/h): check the wind limits of cranes and work at height before starting")
+        flags.append(f"Strong wind/gusts ({g} km/h): check the wind limits of cranes and work at height before starting")
     elif g is not None and g >= 35 and activity in ("crane", "roofing", "scaffolding"):
-        flags.append(f"Moderate gusts ({g} km/h): monitor wind during lifting / work at height")
+        flags.append(f"Moderate wind/gusts ({g} km/h): monitor wind during lifting / work at height")
     if tmin is not None and tmin < 5:
         flags.append(f"Cold (min {tmin} °C): concrete may need cold-weather measures (heating, covers)")
     if tmin is not None and tmin <= 0:
