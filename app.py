@@ -331,8 +331,10 @@ def call_gemini(contents, models):
 # The free-tier lite model sometimes ignores the language rule and the trigger rules, so the code
 # does the parts where the rules are known and hands the model explicit hints.
 _STOP = {
-    "English": "the and of to a in is was on for with will be we at from tomorrow today worker site".split(),
-    "French": "le la les des du de et un une est sur pour avec demain aujourd on chantier travaux pas".split(),
+    "English": ("the and of to a in is was on for with will be we at from tomorrow today worker site painting "
+                "workers floor windows crane").split(),
+    "French": ("le la les des du de et un une est sur pour avec demain aujourd on chantier travaux pas peinture "
+               "intérieure extérieure bureaux peintres ouvriers pose étage fenêtres grue levage benne trottoir").split(),
     "German": "der die das und ist mit auf für ein eine morgen heute baustelle nicht wir".split(),
     "Italian": "il lo gli della di e un una è con per domani oggi cantiere lavori non".split(),
     "Portuguese": "o os as da do de e um uma com para amanhã hoje obra vamos não no na".split(),
