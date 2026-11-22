@@ -557,6 +557,13 @@ def _tool_bubble(name, args, result):
     return f"🔧 {name}", json.dumps(result, ensure_ascii=False)[:300]
 
 
+def _tidy(md):
+    """Small markdown repairs for model glitches (e.g. a list item split before a comma)."""
+    md = re.sub(r"\n\s*\n(\s*[,;])", r"\1", md)   # "worker name\n\n, date" -> "worker name, date"
+    md = re.sub(r"\n(\s*[,;] )", r"\1", md)
+    return md.strip()
+
+
 def _save_report(md):
     f = tempfile.NamedTemporaryFile("w", suffix="_chantierpilot_report.md", delete=False, encoding="utf-8")
     f.write(md)
@@ -603,12 +610,12 @@ def chat(message, history, request: gr.Request = None):
             steps.append(title)
         elif event[0] in ("final", "error"):
             done = gr.ChatMessage(role="assistant", content="\n".join(f"· {s}" for s in steps),
-                                  metadata={"title": f"Checked {len(tools)} tool result(s)" if tools else "Done",
+                                  metadata={"title": (f"Used {len(tools)} tool" + ("s" if len(tools) > 1 else "")) if tools else "Done",
                                             "status": "done", "duration": round(time.time() - t0, 1)})
             if event[0] == "error":
                 yield [done, *tools, gr.ChatMessage(role="assistant", content=f"⚠️ {event[1]}")], gr.update(visible=False)
                 return
-            answer = event[1]
+            answer = _tidy(event[1])
             yield [done, *tools, gr.ChatMessage(role="assistant", content=answer)], \
                 gr.update(value=_save_report(f"Report date: {report_date}\n\n{answer}"), visible=True)
             return
@@ -629,7 +636,7 @@ def generate(note, report_date=None, request=None):
         if event[0] == "tool":
             tool_log.append(event[1:])
         elif event[0] == "final":
-            final = event[1]
+            final = _tidy(event[1])
         elif event[0] == "error":
             return f"❌ {event[1]}", gr.update(visible=False)
     md = final + f"\n\n<details><summary>🔧 Tool calls ({len(tool_log)})</summary>\n\n" + (
@@ -671,6 +678,9 @@ CSS = """
 .cp-small { font-size: .85rem; opacity: .75; }
 #cp-disclaimer { font-size: .78rem; opacity: .7; text-align: center; }
 footer { display: none !important; }
+.message table, .bot table { display: block; overflow-x: auto; width: 100%; }
+.message th, .message td, .bot th, .bot td { min-width: 7.5em; vertical-align: top; }
+.message th:first-child, .message td:first-child { min-width: 6em; }
 """
 
 THEME = gr.themes.Soft(primary_hue="orange", secondary_hue="amber", neutral_hue="slate")
@@ -686,7 +696,7 @@ with gr.Blocks(title="ChantierPilot · site reports & permits for Lausanne", fil
             render_markdown=True, group_consecutive_messages=True,
         ),
         textbox=gr.Textbox(placeholder="Paste today's site note, or ask about a task and a date…",
-                           lines=2, max_lines=12, max_length=MAX_NOTE_CHARS, submit_btn=True, stop_btn=True,
+                           lines=1, max_lines=12, max_length=MAX_NOTE_CHARS, submit_btn=True, stop_btn=True,
                            show_label=False),
         examples=EXAMPLES,
         example_labels=["🧱 Asbestos + crane on the sidewalk (FR)", "🚑 Worker injured (EN)",
