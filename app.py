@@ -29,8 +29,9 @@ import requests
 API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 # Model order (revision log #9): Google retired gemini-2.5-* for new keys (HTTP 404, recommending
 # gemini-3.8-flash / gemini-3.5-flash-lite), and the "-latest" aliases were overloaded (timeouts / HTTP 503).
-# Full model first: the lite models skip tools and the language rule more often.
-MODELS = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash-lite", "gemini-flash-lite-latest"]
+# Full model first; then the lite model, which answers fast (the code guards keep it accurate), before the
+# often-overloaded "-latest" alias (revision log #16).
+MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"]
 INSTRUCTIONS = (Path(__file__).parent / "instructions.md").read_text(encoding="utf-8")
 MAX_NOTE_CHARS = 5000          # longer notes are refused
 MAX_TOOL_ROUNDS = 8            # same limit as v1
@@ -202,10 +203,11 @@ def _verdict(values, activity):
         x = v.get(field)
         if x is not None and _OPS[op](x, limit) and not (level == "CAUTION" and (field, op) in hit_fields):
             hit_fields.add((field, op))
-            reasons.append(f"{level}: {reason}")
+            reasons.append((level, reason))
             if _RANK[level] > _RANK[verdict]:
                 verdict = level
-    return verdict, reasons
+    # The verdict is shown separately, so only lesser levels keep a prefix ("rain 12 mm; CAUTION: wind").
+    return verdict, [r if lvl == verdict else f"{lvl}: {r}" for lvl, r in reasons]
 
 
 def get_site_weather(date=None, activity="general", **_ignored):
@@ -644,8 +646,7 @@ def report_api(note: str, report_date: str = "", request: gr.Request = None) -> 
 # ---------------------------------------------------------------- UI
 WELCOME = """
 <div class="cp-welcome">
-<h2>🏗️ ChantierPilot</h2>
-<p>Send me your end-of-day site note, in any language.<br>
+<p style="font-size:1.05rem"><b>Send me your end-of-day site note</b>, in any language.<br>
 I'll turn it into a <b>daily log</b>, flag the <b>Lausanne, Vaud and Suva forms</b> it triggers with their deadlines,
 and check the <b>weather go / no-go</b> for planned outdoor work.</p>
 <p class="cp-small">You can answer my questions afterwards and I'll update the report.
@@ -681,8 +682,8 @@ with gr.Blocks(title="ChantierPilot · site reports & permits for Lausanne", fil
     gr.ChatInterface(
         fn=chat,
         chatbot=gr.Chatbot(
-            placeholder=WELCOME, layout="panel", buttons=["copy", "copy_all"], scale=1,
-            render_markdown=True, group_consecutive_messages=False,
+            placeholder=WELCOME, layout="panel", buttons=["copy_all"], scale=1, show_label=False,
+            render_markdown=True, group_consecutive_messages=True,
         ),
         textbox=gr.Textbox(placeholder="Paste today's site note, or ask about a task and a date…",
                            lines=2, max_lines=12, max_length=MAX_NOTE_CHARS, submit_btn=True, stop_btn=True,
