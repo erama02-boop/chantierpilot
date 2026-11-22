@@ -26,7 +26,7 @@ Site managers (chefs de chantier) of small and mid-sized construction companies 
 4. a **weather go / no-go** for planned outdoor work (crane, concrete, roofing…), with the next suitable day if it is a no;
 5. **pre-filled form drafts** and the questions needed to complete them.
 
-It answers in the language of the note (FR, EN, DE, IT, PT, ES…); official form names stay in French.
+It works as a chat: you can answer its questions, correct a date or ask "can we lift with the crane on Wednesday?" and it updates the report. It answers in the language of the note (FR, EN, DE, IT, PT, ES…); official form names stay in French.
 
 ## How it works
 | Component | Choice |
@@ -36,7 +36,7 @@ It answers in the language of the note (FR, EN, DE, IT, PT, ES…); official for
 | Knowledge | Form Library v2 (F01–F12), **injected into the context** (no retrieval) |
 | Tool 1 | `calculate_deadline` – deterministic date arithmetic; notice period looked up per form |
 | Tool 2 | `get_site_weather` – weather go/no-go: live Lausanne forecast (Open-Meteo, backup MET Norway), a GO / CAUTION / NO-GO verdict per activity (crane, concrete, roofing, scaffolding, excavation, facade) and the next GO day |
-| Interface | Gradio; report downloadable as Markdown |
+| Interface | Gradio chat: streams its progress and shows each tool result as it happens; follow-up questions update the report; last report downloadable as Markdown; API endpoints `/chat` and `/generate` |
 
 **Why context injection and not RAG:** the whole library is 12 short entries (~25 KB). It fits easily in the context window, so the model always sees every form. Retrieval would add a failure mode (missing the right form) without any benefit at this size. We would switch to retrieval if the library grew to hundreds of regulations.
 

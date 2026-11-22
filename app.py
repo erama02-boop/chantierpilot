@@ -413,55 +413,84 @@ def _allowed(visitor):
     return True
 
 
-# ---------------------------------------------------------------- main handler
-def _save_report(md):
-    f = tempfile.NamedTemporaryFile("w", suffix="_chantierpilot_report.md", delete=False, encoding="utf-8")
-    f.write(md)
-    f.close()
-    return f.name
+# ---------------------------------------------------------------- conversation engine
+MAX_HISTORY_MESSAGES = 12      # earlier turns sent back to the model (keeps requests small)
+_DATE_LINE = re.compile(r"^\s*(report date|date du rapport|datum|data)\s*[:=]\s*(\d{4}-\d{2}-\d{2})\s*$", re.I | re.M)
 
 
-def generate(note, report_date, request: gr.Request = None):
-    note = (note or "").strip()
-    if not note:
-        return "Please paste a site note first.", gr.update(visible=False)
-    if len(note) > MAX_NOTE_CHARS:
-        return f"❌ The note is too long ({len(note)} characters, max {MAX_NOTE_CHARS}). Please shorten it.", gr.update(visible=False)
-    if _parse_date(report_date) is None:
-        return "❌ Report date must be a valid date in the format YYYY-MM-DD.", gr.update(visible=False)
-    if not API_KEY:
-        return "❌ The app is not configured yet: the maintainer must add the GEMINI_API_KEY secret.", gr.update(visible=False)
+def _today():
+    return datetime.now(TZ).date().isoformat()
+
+
+def _visitor(request):
     # Behind a proxy (Hugging Face, Render) the real visitor IP is in X-Forwarded-For.
-    fwd = (getattr(request, "headers", None) or {}).get("x-forwarded-for", "") if request else ""
-    visitor = fwd.split(",")[0].strip() or getattr(getattr(request, "client", None), "host", None) or "anonymous"
-    if not _allowed(visitor):
-        return f"⏳ Rate limit reached ({RATE_LIMIT[0]} reports per hour). Please try again later.", gr.update(visible=False)
+    headers = getattr(request, "headers", None) or {}
+    fwd = headers.get("x-forwarded-for", "") if request else ""
+    return fwd.split(",")[0].strip() or getattr(getattr(request, "client", None), "host", None) or "anonymous"
 
-    # The note is wrapped and labelled as data (see the Security rule in instructions.md).
-    # The date line is in English on purpose: the answer language must follow the note, not this line.
-    lang = detect_language(note)
-    cands = candidate_forms(note)
-    outdoor = outdoor_work(note)
+
+def _text_of(content):
+    if isinstance(content, str):
+        return content
+    if isinstance(content, dict):
+        return content.get("text") or ""
+    if isinstance(content, (list, tuple)):
+        return "\n".join(_text_of(c) for c in content)
+    return ""
+
+
+def _past_turns(history):
+    """User messages and final answers from the chat history (tool/status bubbles are skipped)."""
+    turns = []
+    for msg in history or []:
+        role = msg.get("role") if isinstance(msg, dict) else getattr(msg, "role", None)
+        meta = (msg.get("metadata") if isinstance(msg, dict) else getattr(msg, "metadata", None)) or {}
+        text = _text_of(msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")).strip()
+        if role in ("user", "assistant") and text and not meta.get("title"):
+            turns.append((role, text))
+    return turns[-MAX_HISTORY_MESSAGES:]
+
+
+def build_contents(message, history, report_date):
+    """Gemini contents for this turn. Code pre-checks run over everything the user wrote in the chat."""
+    past = _past_turns(history)
+    user_texts = [t for r, t in past if r == "user"] + [message]
+    all_text = "\n".join(user_texts)
+    lang = detect_language(message) or detect_language(all_text)
+    cands = candidate_forms(all_text)
+    outdoor = outdoor_work(all_text)
     hint = ", ".join(f"{f} (\"{w}\")" for f, w in cands.items()) or "none"
-    user_text = (
+    first = not any(r == "user" for r, _ in past)
+    tag = "site_note" if first else "follow_up"
+    # The control lines are in English on purpose: the answer language must follow the user, not these lines.
+    text = (
         f"Report date: {report_date}\n"
-        + (f"Answer language: {lang}. Write the whole answer in {lang}.\n" if lang else
-           "Answer in the language of the text inside <site_note>.\n")
-        + f"Trigger words found by code (candidate forms): {hint}. Flag only these forms, and only if the note "
-          "really matches the form's rule; a form not in this list needs a clear match in the note.\n"
+        + (f"Answer language: {lang}. Write the whole answer in {lang}, headings and labels included.\n" if lang else
+           f"Answer in the language of the text inside <{tag}>.\n")
+        + f"Trigger words found by code in the user's messages (candidate forms): {hint}. Flag only these forms, and "
+          "only if the notes really match the form's rule; a form not in this list needs a clear match.\n"
         + (f"Outdoor work found by code: {', '.join(outdoor)}. Call get_site_weather for each planned day of this work; "
            "never write a weather verdict or values without the tool.\n" if outdoor else
-           "No outdoor work found by code: skip the weather section unless the note clearly plans outdoor work.\n")
-        + (f"Translate every section heading and label into {lang}.\n" if lang else "")
-        + "\n"
-        + f"<site_note>\n{note}\n</site_note>"
+           "No outdoor work found by code: skip the weather section unless the user clearly plans outdoor work.\n")
+        + ("This is a follow-up in the same conversation: answer it, and if it changes the report (new dates, new facts), "
+           "give the updated report, recomputing deadlines and weather with the tools.\n" if not first else "")
+        + f"\n<{tag}>\n{message}\n</{tag}>"
     )
-    contents = [{"role": "user", "parts": [{"text": user_text}]}]
+    contents = [{"role": "user" if r == "user" else "model", "parts": [{"text": t}]} for r, t in past]
+    contents.append({"role": "user", "parts": [{"text": text}]})
+    return contents, outdoor
+
+
+def run_agent(contents, outdoor):
+    """Runs the model + tools loop. Yields ("model", name), ("tool", name, args, result) and finally
+    ("final", text) or ("error", message)."""
     tool_log, models, nudged = [], MODELS, False
     try:
         for _ in range(MAX_TOOL_ROUNDS):
             j, m = call_gemini(contents, models)
-            models = [m]  # keep the same model for the whole conversation
+            if models is MODELS:
+                yield ("model", m)
+            models = [m]  # keep the same model for the whole turn
             content = j["candidates"][0]["content"]
             parts = content.get("parts", [])
             calls = [p["functionCall"] for p in parts if "functionCall" in p]
@@ -480,14 +509,8 @@ def generate(note, report_date, request: gr.Request = None):
                     contents.append(content)
                     contents.append({"role": "user", "parts": [{"text": NUDGE.format(missing="; ".join(missing))}]})
                     continue
-                md = (text or "❌ Empty answer. Try again.") + f"\n\n---\n*Model: {m}*"
-                md += f"\n\n<details><summary>🔧 Tool calls ({len(tool_log)})</summary>\n\n"
-                md += "\n".join(
-                    f"{i + 1}. `{t['name']}({json.dumps(t['args'], ensure_ascii=False)})` → `{json.dumps(t['result'], ensure_ascii=False)}`"
-                    for i, t in enumerate(tool_log)
-                ) or "No tool was used for this note."
-                md += "\n\n</details>"
-                return md, gr.update(value=_save_report(md), visible=True)
+                yield ("final", text or "I could not produce an answer. Please try again.")
+                return
             # The model asked for tools: OUR code runs them and sends the results back
             contents.append(content)
             responses = []
@@ -499,39 +522,188 @@ def generate(note, report_date, request: gr.Request = None):
                 except Exception as e:
                     result = {"error": f"Tool failed: {type(e).__name__}"}
                 tool_log.append({"name": name, "args": args, "result": result})
+                yield ("tool", name, args, result)
                 fr = {"name": name, "response": result}
                 if fc.get("id"):
                     fr["id"] = fc["id"]
                 responses.append({"functionResponse": fr})
             contents.append({"role": "user", "parts": responses})
-        return "❌ Too many tool calls in a row. Try again or shorten the note.", gr.update(visible=False)
+        yield ("error", "Too many tool calls in a row. Please try again or shorten the note.")
     except RuntimeError as e:
-        return f"❌ {e}", gr.update(visible=False)
+        yield ("error", str(e))
+
+
+def _tool_bubble(name, args, result):
+    """Short, readable summary of one tool call for the chat."""
+    if name == "calculate_deadline":
+        title = f"🗓️ Deadline · {result.get('form_id') or args.get('form_id', '?')}"
+        if "error" in result:
+            return title, f"⚠️ {result['error']}"
+        return title, (f"Work starts {args.get('work_start_date')} → file by **{result['deadline_date']}** · "
+                       f"{result['status']} · {result['priority']}")
+    if name == "get_site_weather":
+        title = f"🌦️ Weather · {args.get('activity', 'general')} · {args.get('date', '?')}"
+        if "error" in result:
+            return title, f"⚠️ {result['error']}"
+        icon = {"GO": "✅", "CAUTION": "⚠️", "NO-GO": "⛔"}.get(result.get("verdict"), "")
+        wind = result.get("gusts_max_kmh") or result.get("wind_max_kmh")
+        line = (f"{icon} **{result.get('verdict')}** · {result.get('temp_min_c')}–{result.get('temp_max_c')} °C · "
+                f"rain {result.get('rain_mm')} mm · wind {wind} km/h ({result.get('source')})")
+        if result.get("next_go_day"):
+            line += f" · next GO day: {result['next_go_day']}"
+        return title, line
+    return f"🔧 {name}", json.dumps(result, ensure_ascii=False)[:300]
+
+
+def _save_report(md):
+    f = tempfile.NamedTemporaryFile("w", suffix="_chantierpilot_report.md", delete=False, encoding="utf-8")
+    f.write(md)
+    f.close()
+    return f.name
+
+
+def _check_input(message, request):
+    message = (message or "").strip()
+    if not message:
+        return "Please type or paste a site note first."
+    if len(message) > MAX_NOTE_CHARS:
+        return f"This message is too long ({len(message)} characters, max {MAX_NOTE_CHARS}). Please shorten it."
+    if not API_KEY:
+        return "The app is not configured yet: the maintainer must add the GEMINI_API_KEY secret."
+    if not _allowed(_visitor(request)):
+        return f"Rate limit reached ({RATE_LIMIT[0]} messages per hour). Please try again later."
+    return None
+
+
+def chat(message, history, request: gr.Request = None):
+    """Chat handler: streams progress (status + tool bubbles), then the answer."""
+    problem = _check_input(message, request)
+    if problem:
+        yield [gr.ChatMessage(role="assistant", content=f"⚠️ {problem}")], gr.update(visible=False)
+        return
+    message = message.strip()
+    m = _DATE_LINE.search(message)  # optional "Report date: YYYY-MM-DD" line overrides today
+    report_date = m.group(2) if m and _parse_date(m.group(2)) else _today()
+    contents, outdoor = build_contents(message, history, report_date)
+
+    t0 = time.time()
+    steps = ["Reading the note and checking it against the form library"]
+    status = gr.ChatMessage(role="assistant", content="",
+                            metadata={"title": "Working on it…", "status": "pending", "log": steps[0]})
+    tools = []
+    yield [status], gr.update(visible=False)
+    for event in run_agent(contents, outdoor):
+        if event[0] == "model":
+            steps.append(f"Model: {event[1]}")
+        elif event[0] == "tool":
+            title, line = _tool_bubble(*event[1:])
+            tools.append(gr.ChatMessage(role="assistant", content=line, metadata={"title": title, "status": "done"}))
+            steps.append(title)
+        elif event[0] in ("final", "error"):
+            done = gr.ChatMessage(role="assistant", content="\n".join(f"· {s}" for s in steps),
+                                  metadata={"title": f"Checked {len(tools)} tool result(s)" if tools else "Done",
+                                            "status": "done", "duration": round(time.time() - t0, 1)})
+            if event[0] == "error":
+                yield [done, *tools, gr.ChatMessage(role="assistant", content=f"⚠️ {event[1]}")], gr.update(visible=False)
+                return
+            answer = event[1]
+            yield [done, *tools, gr.ChatMessage(role="assistant", content=answer)], \
+                gr.update(value=_save_report(f"Report date: {report_date}\n\n{answer}"), visible=True)
+            return
+        status.metadata["log"] = " → ".join(steps[-3:])
+        yield [status, *tools], gr.update(visible=False)
+
+
+def generate(note, report_date=None, request=None):
+    """Single-shot report (no chat history). Used by the tests and the API."""
+    problem = _check_input(note, request)
+    if problem:
+        return f"❌ {problem}", gr.update(visible=False)
+    if report_date is not None and _parse_date(report_date) is None:
+        return "❌ Report date must be a valid date in the format YYYY-MM-DD.", gr.update(visible=False)
+    contents, outdoor = build_contents(note.strip(), [], report_date or _today())
+    tool_log, final = [], None
+    for event in run_agent(contents, outdoor):
+        if event[0] == "tool":
+            tool_log.append(event[1:])
+        elif event[0] == "final":
+            final = event[1]
+        elif event[0] == "error":
+            return f"❌ {event[1]}", gr.update(visible=False)
+    md = final + f"\n\n<details><summary>🔧 Tool calls ({len(tool_log)})</summary>\n\n" + (
+        "\n".join(f"{i + 1}. `{n}({json.dumps(a, ensure_ascii=False)})` → `{json.dumps(r, ensure_ascii=False)}`"
+                  for i, (n, a, r) in enumerate(tool_log)) or "No tool was used for this note.") + "\n\n</details>"
+    return md, gr.update(value=_save_report(md), visible=True)
+
+
+def report_api(note: str, report_date: str = "", request: gr.Request = None) -> str:
+    """API endpoint: one note in, one Markdown report out (with the tool calls listed)."""
+    return generate(note, report_date or None, request)[0]
 
 
 # ---------------------------------------------------------------- UI
-with gr.Blocks(title="ChantierPilot") as demo:
-    gr.Markdown(
-        "# 🏗️ ChantierPilot\n"
-        "Turn end-of-day site notes into a structured daily log, and see which Lausanne, Vaud or federal (Suva) "
-        "forms may need to be filed.\n\n"
-        "> ⚠️ **Demo tool for a university course.** Not legal advice. Always check requirements with the City of "
-        "Lausanne, the Canton of Vaud or Suva before filing. Please only paste fictional notes."
+WELCOME = """
+<div class="cp-welcome">
+<h2>🏗️ ChantierPilot</h2>
+<p>Send me your end-of-day site note, in any language.<br>
+I'll turn it into a <b>daily log</b>, flag the <b>Lausanne, Vaud and Suva forms</b> it triggers with their deadlines,
+and check the <b>weather go / no-go</b> for planned outdoor work.</p>
+<p class="cp-small">You can answer my questions afterwards and I'll update the report.
+To use another report date, start your note with <code>Report date: 2026-11-21</code>.</p>
+</div>
+"""
+
+EXAMPLES = [
+    EXAMPLE,
+    "Site at Chemin de Mornex 5, Lausanne. A worker fell from a ladder and was taken to hospital by ambulance.",
+    "Place de la Riponne, Lausanne. Demain bétonnage de la dalle en extérieur, 6 ouvriers.",
+    "Can we do the crane lift at Avenue de Beaulieu 9, Lausanne, next Wednesday?",
+]
+
+CSS = """
+.gradio-container { max-width: 980px !important; margin: 0 auto !important; }
+#cp-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 4px 0; }
+#cp-header h1 { font-size: 1.35rem; margin: 0; }
+#cp-header p { margin: 0; opacity: .75; font-size: .9rem; }
+.cp-welcome { text-align: center; max-width: 560px; margin: 0 auto; }
+.cp-welcome h2 { margin-bottom: .4em; }
+.cp-small { font-size: .85rem; opacity: .75; }
+#cp-disclaimer { font-size: .78rem; opacity: .7; text-align: center; }
+footer { display: none !important; }
+"""
+
+THEME = gr.themes.Soft(primary_hue="orange", secondary_hue="amber", neutral_hue="slate")
+
+with gr.Blocks(title="ChantierPilot · site reports & permits for Lausanne", fill_height=True) as demo:
+    gr.HTML("<div id='cp-header'><div><h1>🏗️ ChantierPilot</h1>"
+            "<p>Site reports, permits and weather go / no-go for construction sites in Lausanne</p></div></div>")
+    download = gr.DownloadButton("⬇️ Download the last report (.md)", visible=False, size="sm", render=False)
+    gr.ChatInterface(
+        fn=chat,
+        chatbot=gr.Chatbot(
+            placeholder=WELCOME, layout="panel", buttons=["copy", "copy_all"], scale=1,
+            render_markdown=True, group_consecutive_messages=False,
+        ),
+        textbox=gr.Textbox(placeholder="Paste today's site note, or ask about a task and a date…",
+                           lines=2, max_lines=12, max_length=MAX_NOTE_CHARS, submit_btn=True, stop_btn=True,
+                           show_label=False),
+        examples=EXAMPLES,
+        example_labels=["🧱 Asbestos + crane on the sidewalk (FR)", "🚑 Worker injured (EN)",
+                        "🌧️ Concrete pour tomorrow (FR)", "🏗️ Crane lift next Wednesday?"],
+        additional_outputs=[download],
+        fill_height=True,
+        autofocus=True,
+        concurrency_limit=2,
+        api_name="chat",
     )
-    with gr.Row():
-        with gr.Column():
-            note = gr.Textbox(label="Site note (any language)", lines=10, max_length=MAX_NOTE_CHARS,
-                              placeholder="What happened on site today?")
-            report_date = gr.Textbox(label="Report date (YYYY-MM-DD)", value=lambda: datetime.now(TZ).date().isoformat())
-            with gr.Row():
-                ex = gr.Button("Load example note")
-                go = gr.Button("Generate report", variant="primary")
-        with gr.Column():
-            out = gr.Markdown("The report will appear here.")
-            dl = gr.DownloadButton("⬇️ Download report (.md)", visible=False)
-    ex.click(lambda: EXAMPLE, outputs=note)
-    go.click(generate, inputs=[note, report_date], outputs=[out, dl], concurrency_limit=2)
+    download.render()
+    gr.Markdown("⚠️ Demo tool for a university course (HEC Lausanne). Not legal advice: always check with the City of "
+                "Lausanne, the Canton of Vaud or Suva before filing. Please use fictional notes only.",
+                elem_id="cp-disclaimer")
+    # Keep the single-shot report endpoint for testing and integrations.
+    gr.api(report_api, api_name="generate")
 
 if __name__ == "__main__":
     # Render (and most hosts) give the port in $PORT and need 0.0.0.0; Hugging Face uses 7860.
-    demo.queue(max_size=20).launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)))
+    demo.queue(max_size=20).launch(server_name="0.0.0.0", server_port=int(os.environ.get("PORT", 7860)),
+                                   theme=THEME, css=CSS)
