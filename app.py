@@ -86,7 +86,10 @@ def calculate_deadline(form_id=None, report_date=None, work_start_date=None, **_
     deadline = start - timedelta(days=notice)
     days_left = (deadline - today).days
     priority = "🔴 URGENT" if days_left <= 2 else "🟠 SOON" if days_left <= 14 else "🟢 PLANNED"
-    status = f"Deadline passed {-days_left} days ago" if days_left < 0 else f"{days_left} days left"
+    n = abs(days_left)
+    status = ("Due today" if days_left == 0 else
+              f"Deadline passed {n} day{'s' if n != 1 else ''} ago" if days_left < 0 else
+              f"{n} day{'s' if n != 1 else ''} left")
     return {
         "form_id": form_id,
         "notice_days_used": notice,
@@ -557,8 +560,22 @@ def _tool_bubble(name, args, result):
     return f"🔧 {name}", json.dumps(result, ensure_ascii=False)[:300]
 
 
-def _tidy(md):
+def _fix_dates(md, results):
+    """The model sometimes miscopies a tool date (e.g. 2025-11-25 for 2026-11-25).
+    Any date in the answer with the same month-day as a tool date but another year is set back to the tool date."""
+    for r in results:
+        for key in ("date", "deadline", "work_start_date", "next_go_day"):
+            d = r.get(key) if isinstance(r, dict) else None
+            if isinstance(d, str) and re.fullmatch(r"\d{4}-\d{2}-\d{2}", d):
+                md = re.sub(rf"\b(?!{d[:4]})\d{{4}}-{d[5:]}\b", d, md)
+    return md
+
+
+def _tidy(md, results=()):
     """Small markdown repairs for model glitches (e.g. a list item split before a comma)."""
+    md = _fix_dates(md, results)
+    md = re.sub(r"\b1 days\b", "1 day", md)
+    md = re.sub(r"\b1 jours\b", "1 jour", md)
     md = re.sub(r"\n\s*\n(\s*[,;])", r"\1", md)   # "worker name\n\n, date" -> "worker name, date"
     md = re.sub(r"\n(\s*[,;] )", r"\1", md)
     return md.strip()
@@ -599,12 +616,13 @@ def chat(message, history, request: gr.Request = None):
     steps = ["Reading the note and checking it against the form library"]
     status = gr.ChatMessage(role="assistant", content="",
                             metadata={"title": "Working on it…", "status": "pending", "log": steps[0]})
-    tools = []
+    tools, results = [], []
     yield [status], gr.update(visible=False)
     for event in run_agent(contents, outdoor):
         if event[0] == "model":
             steps.append(f"Model: {event[1]}")
         elif event[0] == "tool":
+            results.append(event[3])
             title, line = _tool_bubble(*event[1:])
             tools.append(gr.ChatMessage(role="assistant", content=line, metadata={"title": title, "status": "done"}))
             steps.append(title)
@@ -615,7 +633,7 @@ def chat(message, history, request: gr.Request = None):
             if event[0] == "error":
                 yield [done, *tools, gr.ChatMessage(role="assistant", content=f"⚠️ {event[1]}")], gr.update(visible=False)
                 return
-            answer = _tidy(event[1])
+            answer = _tidy(event[1], results)
             yield [done, *tools, gr.ChatMessage(role="assistant", content=answer)], \
                 gr.update(value=_save_report(f"Report date: {report_date}\n\n{answer}"), visible=True)
             return
@@ -636,7 +654,7 @@ def generate(note, report_date=None, request=None):
         if event[0] == "tool":
             tool_log.append(event[1:])
         elif event[0] == "final":
-            final = _tidy(event[1])
+            final = _tidy(event[1], [t[2] for t in tool_log])
         elif event[0] == "error":
             return f"❌ {event[1]}", gr.update(visible=False)
     md = final + f"\n\n<details><summary>🔧 Tool calls ({len(tool_log)})</summary>\n\n" + (
