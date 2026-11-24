@@ -37,6 +37,7 @@ MAX_NOTE_CHARS = 5000          # longer notes are refused
 MAX_TOOL_ROUNDS = 8            # same limit as v1
 RATE_LIMIT = (int(os.environ.get("RATE_LIMIT_PER_HOUR", "30")), 3600)  # reports per visitor per hour
 TIMEOUT_S = 30
+CALL_BUDGET_S = 90  # max time one model call may take, retries included
 TZ = ZoneInfo("Europe/Zurich")
 
 # Notice periods (calendar days before the start date). Single source of truth:
@@ -309,8 +310,12 @@ def call_gemini(contents, models, made_by=None):
     are usually short spikes, so it makes 3 rounds with growing waits (revision log #19)."""
     last_err = ""
     waits = [3, 8]
+    t0 = time.time()
     for attempt in range(3):
         for m in models:
+            left = CALL_BUDGET_S - (time.time() - t0)
+            if left < 5:  # do not keep visitors waiting for minutes when Google is overloaded everywhere
+                break
             try:
                 r = requests.post(
                     f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
@@ -321,7 +326,7 @@ def call_gemini(contents, models, made_by=None):
                         "tools": [{"functionDeclarations": TOOL_DECLARATIONS}],
                         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
                     },
-                    timeout=TIMEOUT_S,
+                    timeout=min(TIMEOUT_S, left),
                 )
                 j = r.json()
             except requests.Timeout:
@@ -342,13 +347,16 @@ def call_gemini(contents, models, made_by=None):
                 # Do not show Google's raw message to visitors; log it for the maintainer.
                 print(f"[ChantierPilot] Gemini refused the request ({r.status_code}): {last_err}", flush=True)
                 raise RuntimeError("The service is not configured correctly (API key). Please tell the maintainers.")
+        if time.time() - t0 > CALL_BUDGET_S - 5:
+            break
         if attempt < 2:
             # Free-tier quota (HTTP 429) is per minute: wait longer before the next round.
             quota = "429" in str(last_err) or "quota" in str(last_err).lower()
             time.sleep(20 if quota else waits[attempt])
     if "quota" in str(last_err).lower():
         raise RuntimeError("The free AI quota is used up for the moment. Please wait about a minute and try again.")
-    raise RuntimeError("Google's AI models are overloaded right now (high demand). Please try again in a minute.")
+    raise RuntimeError("Google's free AI models are all overloaded right now (high demand on Google's side). "
+                       "Your note is still in the chat: press 🔄 Retry in a minute or two.")
 
 
 
