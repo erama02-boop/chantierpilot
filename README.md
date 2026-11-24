@@ -33,7 +33,7 @@ It works as a chat: you can answer its questions, correct a date or ask "can we 
 |---|---|
 | Model | Google Gemini (gemini-3.8-flash, then 3 fallbacks), temperature 0.2 |
 | Instructions | `instructions.md` (role, steps, output format, rules, security rule) |
-| Knowledge | Form Library v2 (F01–F12), **injected into the context** (no retrieval) |
+| Knowledge | Form Library v3 (F01–F28: City of Lausanne, Canton of Vaud, Suva, SiL, tl), **injected into the context** (no retrieval) |
 | Tool 1 | `calculate_deadline` – deterministic date arithmetic; notice period looked up per form |
 | Tool 2 | `get_site_weather` – weather go/no-go: live Lausanne forecast (Open-Meteo, backup MET Norway), a GO / CAUTION / NO-GO verdict per activity (crane, concrete, roofing, scaffolding, excavation, facade) and the next GO day |
 | Interface | Gradio chat: streams its progress and shows each tool result as it happens; follow-up questions update the report; last report downloadable as Markdown; API endpoints `/chat` and `/generate` |
@@ -44,7 +44,7 @@ It works as a chat: you can answer its questions, correct a date or ask "can we 
 
 ## Limits
 - Covers only the City of Lausanne (+ Vaud and Suva obligations there). Other communes get the daily log only.
-- F10 (complementary building permit) threshold and the noise-hours part of F12 are marked **TO VERIFY**; the app says so when it flags them.
+- Items marked **TO VERIFY** (F10 threshold, F12 noise hours, the submission channel of F13, F16 lead time, F22 and F27 channels) are flagged as such in answers.
 - Weather thresholds are indicative, not legal limits. Forecasts cover 16 days.
 - The model can still misread a note: the site manager reviews every draft; the app never submits anything.
 

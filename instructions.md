@@ -36,7 +36,7 @@ Draft forms: for each alert, ONLY the fields listed under "Info to pre-fill" in 
 Questions for the site manager: only questions needed to complete the forms or to check a possible trigger.
 
 Rules
-Evidence rule: Only put a form in the alerts table if the note contains words that clearly match its triggers. Work on private property (roof, inside the building, courtyard, garden) does NOT trigger F01: F01 needs the note to say that the street, sidewalk, road or parking is used. F02 needs the note to say that a site opens or works begin on a future date; ongoing work on a site that is already running does NOT trigger F02. If a form MIGHT apply but the note does not say so, do not flag it: ask about it under Questions instead.
+Evidence rule: Only put a form in the alerts table if the note contains words that clearly match its triggers. Work on private property (roof, inside the building, courtyard, garden) does NOT trigger F01: F01 needs the note to say that the street, sidewalk, road or parking is used. F02 needs the note to say that a site opens or works begin on a future date; ongoing work on a site that is already running does NOT trigger F02. F13 needs a crane or scaffold that is about to be assembled (not one already standing). F15 needs digging or a trench that has not started yet. F20 needs water to be pumped, discharged or washed out on site. F22 needs a concrete sign of pollution actually found (smell, colour, buried waste, tank); it is 🔴 URGENT the day it is found. F23 needs soil to be moved or removed in Lausanne. F24 and F26 apply to projects still being prepared or finishing (waste proof at the end of works); F25 and F26 are NEVER flagged for works that are already running with a permit. F27 only for a project with a building permit, at its start or end. F28 is optional advice, never 🔴 URGENT. If a form MIGHT apply but the note does not say so, do not flag it: ask about it under Questions instead.
 Conditional forms: If a form only applies after something is confirmed (e.g. F05 asbestos removal only if the test confirms asbestos), mark it "IF CONFIRMED" and do not give it a priority above 🟢 PLANNED.
 Only use the Form Library. Never invent a form, deadline, authority, email, fee or field. If something looks regulated but is not in the library, write: "Not covered by my library – check with the Office des permis de construire."
 If a library entry (or part of an entry) has Status: TO VERIFY, still flag it, but add: "⚠️ Requirement not yet verified – confirm with the authority before relying on it." Never invent the missing details.
@@ -54,7 +54,7 @@ Built from public sources (lausanne.ch, vd.ch, suva.ch, fedlex), October–Novem
 - **VERIFIED** – checked against the official page listed in SOURCE.
 - **TO VERIFY** – placeholder; the assistant must tell the user to confirm with the authority before relying on it.
 
-Each entry uses the same fields so the assistant can match triggers and pre-fill forms. The notice periods used by the calculate_deadline tool are: F01 = 2 days, F02 = 10 days, F05 = 14 days, F08 = 14 days; all other forms = 0 days (deadline is the start date itself).
+Each entry uses the same fields so the assistant can match triggers and pre-fill forms. The notice periods used by the calculate_deadline tool are: F01 = 10 working days (Mon–Fri), F02 = 10 days, F05 = 14 days, F08 = 14 days, F13 = 10 days, F14 = 2 days, F15 = 7 days (indicative: plans take about a week), F25 = 30 days, F26 = 30 days (minimum: the public inquiry alone lasts 30 days); all other forms = 0 days (deadline is the start date itself, or the discovery date for F22).
 
 ---
 
@@ -65,12 +65,12 @@ Each entry uses the same fields so the assistant can match triggers and pre-fill
 - **Triggers (EN):** skip / container on the street, scaffolding on the sidewalk, crane or truck parked on public road, using parking spaces, closing a lane or sidewalk, any work on public ground, hoarding/fence on public land
 - **Triggers (FR):** benne sur la route, échafaudage sur le trottoir, grue sur la voie publique, places de parc, fermeture de voie, fouille, palissade sur le domaine public
 - **Rule:** Any intervention on or occupation of public space requires this permit **before** it starts. The permit is paid (public-space tariff).
-- **Deadline:** Online request must be finalised **at least 48 hours before** a simple occupation of public space or one affecting metered parking. Larger interventions may need more time – advise contacting the inspector early.
+- **Deadline:** Send the request by email to infopermis@lausanne.ch **at least 10 working days before** the occupation starts. The online form the city then sends must be completed at least 48 hours before a simple occupation (or one affecting metered parking) and at least 6 days before works, excavations (fouilles) or scaffolding, or when reserving "macaron" parking. Parking-ban signs are put up by the company 48 hours / 6 days before. The decision comes by email within 2 working days.
 - **Who files:** Contractor or project owner (requérant)
 - **Info to pre-fill:** site address, company, responsible person + phone, exact location on public space (street, sidewalk, parking spots), surface, start and end dates, type of equipment (skip, scaffold, crane, vehicle)
-- **How to submit:** Request to the city; after the site inspector checks it, the applicant gets an email link to the online form.
+- **How to submit:** Email infopermis@lausanne.ch with full contact details, the address(es) of the occupation and a detailed site installation plan (remaining sidewalk/road width, safety measures); for private works also the project owner's contact. After the site inspector checks it, the applicant gets an email link to the online form.
 - **Penalty risk:** Applicant is solely responsible toward the city, including legal consequences in case of accident.
-- **Source:** https://www.lausanne.ch/vie-pratique/mobilite/domaine-public/utilisation-temporaire-domaine-public
+- **Source:** https://www.lausanne.ch/prestations/mobilite-et-amenagements-publics/demande-permis-utilisation-temporaire-domaine-public.html
 - **Status:** VERIFIED
 
 ## F02 – Avis d'ouverture de chantier (formulaire 119)
@@ -214,3 +214,227 @@ Each entry uses the same fields so the assistant can match triggers and pre-fill
 - **Separate noise rules:** Noise limits and quiet hours for building sites are set by the Règlement général de police (RGP) and federal construction-noise guidance – **TO VERIFY** with the City before relying on specific hours.
 - **Source:** https://www.lausanne.ch/vie-pratique/travail/protection-des-travailleurs/employeur/derogation-travail-nuit-ou-dimanche.html
 - **Status:** VERIFIED (labour-law permit) / TO VERIFY (noise hours)
+
+## F13 – Avis de montage de grue ou d'échafaudage (RPAC art. 5)
+- **English:** Notice before assembling a crane or scaffolding
+- **Level:** Canton of Vaud rule, applied by the City of Lausanne
+- **Authority:** Ville de Lausanne – organe de contrôle des chantiers
+- **Triggers (EN):** crane assembly, tower crane arrives, mobile crane set up for several days, scaffolding erection, putting up scaffolding
+- **Triggers (FR):** montage de la grue, grue à tour, monter l'échafaudage, pose de l'échafaudage, montage d'échafaudage
+- **Rule:** Except in emergencies, the site control body must be told **at least ten days in advance** of a site opening or of the assembly of cranes or scaffolding (RPAC art. 5). It may require an inspection or stability tests before use. If the crane or scaffold stands on public ground, F01 is also needed.
+- **Deadline:** **At least 10 days before** assembly.
+- **Who files:** Contractor (or the project owner's representative)
+- **Info to pre-fill:** site address, type of equipment (tower crane, mobile crane, scaffold), assembly date, company + responsible person + phone, on public ground yes/no
+- **How to submit:** With the site-opening notice (F02, prevacc@lausanne.ch) or directly to the site control body – **TO VERIFY** which channel the City prefers for a crane/scaffold-only notice.
+- **Source:** https://www.lausanne.ch/prestations/mobilite-et-amenagements-publics/demande-permis-utilisation-temporaire-domaine-public.html
+- **Status:** VERIFIED (rule and 10 days) / TO VERIFY (submission channel)
+
+## F14 – Avis au Service du cadastre (point cadastral déplacé ou touché)
+- **English:** Notice to the land survey office when an official survey point is moved or affected
+- **Level:** City of Lausanne
+- **Authority:** Ville de Lausanne – Service du cadastre
+- **Triggers (EN):** survey marker, boundary stone, cadastral point, benchmark removed or covered
+- **Triggers (FR):** borne, point cadastral, point fixe, borne déplacée, borne arrachée
+- **Rule:** If works move or affect an official cadastral point, the applicant must tell the cadastre office beforehand.
+- **Deadline:** **At least 48 hours before.**
+- **Who files:** Contractor / applicant of the public-space permit
+- **Info to pre-fill:** site address, location of the point, date of the intervention, company + contact
+- **How to submit:** Service du cadastre, rue du Port-Franc 18, 1001 Lausanne (contact on the city page).
+- **Source:** https://www.lausanne.ch/prestations/mobilite-et-amenagements-publics/demande-permis-utilisation-temporaire-domaine-public.html
+- **Status:** VERIFIED
+
+## F15 – Commande des plans du cadastre souterrain (conduites et réseaux)
+- **English:** Order the underground utility plans before digging
+- **Level:** City of Lausanne (plus other network owners)
+- **Authority:** Ville de Lausanne – Service du cadastre (cadastre souterrain); also Swisscom and other network owners
+- **Triggers (EN):** excavation, digging, trench, drilling into the ground, test pit, earthworks near pipes or cables
+- **Triggers (FR):** fouille, tranchée, creuser, terrassement, excavation, sondage, forage
+- **Rule:** Before opening a trench, get the plans of the underground networks (sewers, district heating, drinking water, electricity, gas, telecoms, tl). The City's plan does not show every pipe: also consult the network owners' plans (plans-reseaux.ch, Swisscom).
+- **Deadline:** Before digging. Delivery takes about **one week**, so order at least 7 days ahead (indicative).
+- **Who files:** Contractor or engineer
+- **Info to pre-fill:** site address or parcel number, extent of the excavation, format wanted (PDF/DXF/DWG), company + contact
+- **How to submit:** Online order on the City's "Commande plan cadastral des conduites" page; other networks via plans-reseaux.ch.
+- **Source:** https://www.lausanne.ch/prestations/cadastre/commande-plan-cadastral-des-conduites.html ; https://www.lausanne.ch/dam/jcr:baa324f4-23e9-4170-b18b-b4f85ce95d5d/cadastre_adresses_bureaux_techniques.pdf
+- **Status:** VERIFIED
+
+## F16 – Annonce de travaux à proximité des transports publics (tl / LEB)
+- **English:** Notice of works near tram, metro, bus or LEB lines
+- **Level:** Transport operators in Lausanne
+- **Authority:** tl – Demandes d'approbation des travaux; LEB (Echallens)
+- **Triggers (EN):** works near the tram, metro, m1, m2, LEB, railway tracks, trolleybus overhead lines, bus stop
+- **Triggers (FR):** voies du tram, métro, m1, m2, LEB, rails, ligne de contact, lignes aériennes trolleybus, arrêt de bus
+- **Rule:** All interventions and works near a public transport operation must be announced before they start.
+- **Deadline:** Before works start – lead time **TO VERIFY** with the tl (contact them as early as possible).
+- **Who files:** Contractor or project owner
+- **Info to pre-fill:** site address, line or stop concerned, type of works, dates, equipment (crane, excavation), company + contact
+- **How to submit:** Email Approbation_travaux@t-l.ch (tl); LEB: admin.leb@leb.ch.
+- **Source:** https://www.lausanne.ch/dam/jcr:baa324f4-23e9-4170-b18b-b4f85ce95d5d/cadastre_adresses_bureaux_techniques.pdf
+- **Status:** VERIFIED (obligation and contacts) / TO VERIFY (lead time)
+
+## F17 – Autorisation d'ancrages sous le domaine public
+- **English:** Permit for anchors, soil nails or tie-backs under public ground
+- **Level:** City of Lausanne
+- **Authority:** Municipalité de Lausanne – Service du cadastre
+- **Triggers (EN):** ground anchors, tie-backs, soil nails, shoring wall, berliner wall next to the street
+- **Triggers (FR):** ancrages, tirants, clous, paroi berlinoise, paroi clouée, soutènement le long de la route
+- **Rule:** Temporary consolidation elements, nails or anchors that extend under public ground (or the building line) need a municipal permit. Permanent diaphragm walls or piles under public ground are forbidden.
+- **Deadline:** Before installing the anchors – no fixed notice period found.
+- **Who files:** Project owner / engineer
+- **Info to pre-fill:** site address, parcel, type and number of anchors, length under public ground, plans/sections showing the public-domain limit, dates
+- **How to submit:** Request in two copies to the Service du cadastre with detailed plans, sections and elevations.
+- **Source:** https://www.lausanne.ch/prestations/cadastre/ancrages.html
+- **Status:** VERIFIED
+
+## F18 – Raccordement électrique provisoire de chantier (SiL)
+- **English:** Temporary site power connection
+- **Level:** City of Lausanne (Services industriels)
+- **Authority:** Services industriels de Lausanne (SiL)
+- **Triggers (EN):** site power, temporary electricity, site distribution board, construction power box
+- **Triggers (FR):** courant de chantier, électricité de chantier, coffret provisoire, tableau de chantier, raccordement provisoire
+- **Rule:** All requests for a temporary site connection go through the Elektroform platform. A private cable from the site to the supply point is the applicant's responsibility. Box installation and monthly rental are charged.
+- **Deadline:** Before power is needed – no fixed notice found; request as early as possible.
+- **Who files:** Licensed electrician / contractor
+- **Info to pre-fill:** site address, nominal and peak current (A), dates of use, company + contact
+- **How to submit:** Elektroform platform; questions to raccordements@lausanne.ch.
+- **Source:** https://www.lausanne.ch/vie-pratique/energies-et-eau/services-industriels/partenaires/raccordements.html?tab=electricite
+- **Status:** VERIFIED
+
+## F19 – Raccordement au réseau d'eau / alimentation provisoire de chantier
+- **English:** Water connection request (including temporary site water)
+- **Level:** City of Lausanne
+- **Authority:** Ville de Lausanne – Service de l'eau
+- **Triggers (EN):** site water, temporary water supply, water meter, new water connection, hydrant use
+- **Triggers (FR):** eau de chantier, alimentation provisoire, raccordement d'eau, compteur d'eau, branchement d'eau
+- **Rule:** Every connection to the water network is requested from the Service de l'eau and done by a licensed (concessionnaire) plumber. The temporary site supply needs a shut-off valve and a backflow preventer.
+- **Deadline:** Before the connection is needed – no fixed notice found.
+- **Who files:** Property owner (with a land-register extract under 30 days old) and a licensed plumber
+- **Info to pre-fill:** site address, owner, plumber company, temporary or permanent, dates
+- **How to submit:** Contact the Service de l'eau (021 315 85 30, eau@lausanne.ch) to receive the official form.
+- **Source:** https://www.lausanne.ch/prestations/eau/demande-raccordement-reseau-eau.html
+- **Status:** VERIFIED
+
+## F20 – Plan d'évacuation des eaux de chantier (PEE, DCPE 872)
+- **English:** Site wastewater management plan
+- **Level:** Canton of Vaud directive, required by the City of Lausanne
+- **Authority:** Commune (validation) – Canton DGE oversees
+- **Triggers (EN):** pumping water out of the excavation, dewatering, concrete wash water, slurry, muddy water going to the drain
+- **Triggers (FR):** eaux de chantier, pompage de la fouille, eau dans la fouille, eaux de lavage, laitance, boues, rejet à l'égout
+- **Rule:** Since 1 April 2026, every building-permit request in Lausanne must include a site-water evacuation plan (PEE). The authority validates it before works start, and an updated version with contacts goes to the commune before the start. Polluted water must be treated before discharge.
+- **Deadline:** With the building-permit request, and updated **before works start**.
+- **Who files:** Project owner (maître d'ouvrage) or representative
+- **Info to pre-fill:** site address, parcel, types of site water, treatment (settling, pH neutralisation), discharge point, volumes, responsible persons
+- **How to submit:** Cantonal PEE form, attached to the permit request; update sent to the commune.
+- **Source:** https://www.lausanne.ch/eauxdechantier ; https://www.vd.ch/environnement/eaux/protection-des-eaux-epuration-pgee-agriculture-qualite-biologique-et-chimique-des-eaux/evacuation-et-epuration-des-eaux/chantiers
+- **Status:** VERIFIED
+
+## F21 – Autorisation spéciale pour travaux dans la nappe (DGE – eaux souterraines)
+- **English:** Special permit for works in groundwater
+- **Level:** Canton of Vaud
+- **Authority:** DGE – section Eaux souterraines
+- **Triggers (EN):** groundwater, water table, lowering the water table, building below the water table
+- **Triggers (FR):** nappe, nappe phréatique, rabattement de nappe, eaux souterraines, sous le niveau de la nappe
+- **Rule:** All works in the groundwater (exposing it, temporarily lowering it, building in it, special civil-engineering works) need a special permit from the DGE.
+- **Deadline:** Before the works – no fixed notice found.
+- **Who files:** Project owner / engineer
+- **Info to pre-fill:** site address, parcel, type of intervention, expected depth and pumping, dates
+- **How to submit:** DGE – Eaux souterraines (usually through the CAMAC building-permit file).
+- **Source:** https://www.vd.ch/environnement/eaux/eaux-souterraines/constructions-dans-les-secteurs-particulierement-menaces-au-s-pp
+- **Status:** VERIFIED
+
+## F22 – Annonce d'un site pollué découvert (LASP art. 4)
+- **English:** Report polluted ground discovered on site
+- **Level:** Canton of Vaud
+- **Authority:** Département cantonal (DGE – sites pollués)
+- **Triggers (EN):** polluted soil, contaminated ground, smell of fuel, hydrocarbons, buried waste, old landfill, oil tank found
+- **Triggers (FR):** terre polluée, pollution du sol, odeur d'hydrocarbures, hydrocarbures, mazout, déchets enfouis, ancienne décharge, citerne découverte
+- **Rule:** Anyone who discovers or learns that a site contains polluted materials must report it to the department **without delay**. Stop moving the material until a specialist has assessed it.
+- **Deadline:** **Without delay** (the discovery date is the deadline).
+- **Who files:** Project owner or contractor
+- **Info to pre-fill:** site address, parcel, what was found, where, approximate volume, measures taken, date of discovery
+- **How to submit:** Report to the DGE – contact channel **TO VERIFY** on vd.ch (sites pollués).
+- **Source:** https://www.lexfind.ch/tol/24003/de
+- **Status:** VERIFIED (obligation) / TO VERIFY (channel)
+
+## F23 – Diagnostic des matériaux terreux (périmètre dioxines, DCPE 877)
+- **English:** Soil pollution diagnosis in the Lausanne dioxin area
+- **Level:** Canton of Vaud (DGE)
+- **Authority:** DGE – Géologie, sols, déchets
+- **Triggers (EN):** topsoil removal, stripping topsoil, moving earth in a garden, soil to the landfill, dioxin
+- **Triggers (FR):** terre végétale, décapage, matériaux terreux, mouvement de terres, évacuation des terres, dioxine
+- **Rule:** Much of Lausanne lies in the cantonal dioxin perimeter. Any site that handles soil inside the "Gestion des matériaux terreux" perimeter is suspected polluted and needs a pollution diagnosis; the soil is then managed under art. 16 OLED and directive DCPE 877. Check the perimeter on geo.vd.ch.
+- **Deadline:** Before moving the soil (with the building permit when there is one).
+- **Who files:** Project owner (with a soil specialist)
+- **Info to pre-fill:** site address, parcel, surface and depth of soil moved, destination of the soil
+- **How to submit:** Diagnosis by a specialist, attached to the permit file / waste plan (F24).
+- **Source:** https://www.vd.ch/environnement/sols/pollution-des-sols-aux-dioxines/gestion-des-materiaux-terreux
+- **Status:** VERIFIED
+
+## F24 – Plan d'élimination des déchets de chantier (art. 16 OLED)
+- **English:** Construction waste disposal plan
+- **Level:** Federal rule, cantonal model form, checked by the commune
+- **Authority:** Commune (building-permit authority)
+- **Triggers (EN):** construction waste, rubble, demolition waste, waste sorting, disposal slips
+- **Triggers (FR):** déchets de chantier, gravats, tri des déchets, bons d'évacuation, élimination des déchets
+- **Rule:** When a project produces significant construction waste, the project owner gives the permit authority a disposal plan with the permit request, and on request proves after the works that the waste was disposed of as planned. Asbestos diagnosis is needed for buildings built before 1991.
+- **Deadline:** With the building-permit request; proof **at the end of works**.
+- **Who files:** Project owner (maître d'ouvrage)
+- **Info to pre-fill:** site address, CAMAC number, types and volumes of waste, disposal routes, excavation materials and their destination
+- **How to submit:** Cantonal model "Plan d'élimination des déchets de chantier", linked in the CAMAC form.
+- **Source:** https://www.vd.ch/themes/environnement/dechets/boite-outils-dechets
+- **Status:** VERIFIED
+
+## F25 – Demande de travaux dispensés de permis de construire
+- **English:** Request for minor works exempt from a building permit
+- **Level:** City of Lausanne
+- **Authority:** Ville de Lausanne – Service de l'urbanisme
+- **Triggers (EN):** replace windows, solar panels, heat pump, small shed, repaint the facade, roof repair, EV charger, change of use, interior renovation
+- **Triggers (FR):** changement des fenêtres, panneaux solaires, pompe à chaleur, cabane de jardin, repeindre la façade, réfection de toiture, borne de recharge, changement d'affectation
+- **Rule:** All works must be announced to the commune (art. 103 LATC) so it can decide the procedure. Minor works can be exempted from a permit with this request. Fixed fee CHF 150. Some cases need extra opinions (heritage, trees within 1.5 m, SiL).
+- **Deadline:** The City reviews within **30 days** – file at least 30 days before the works.
+- **Who files:** Property owner (or representative with a power of attorney)
+- **Info to pre-fill:** address, parcel, owner, applicant, description of works, cost estimate, photos before works
+- **How to submit:** Completed and signed form with documents by email to annonce.travaux@lausanne.ch.
+- **Source:** https://www.lausanne.ch/en/prestations/urbanisme/travaux-non-soumis-a-permis-de-construire.html ; https://www.lausanne.ch/dam/jcr:d6cdf7ac-b627-41dc-aa2e-63cdc49b1028/260224_formulaire%20demande%20de%20travaux.pdf
+- **Status:** VERIFIED
+
+## F26 – Demande de permis de construire (CAMAC)
+- **English:** Building permit application
+- **Level:** City of Lausanne with the Canton (CAMAC)
+- **Authority:** Ville de Lausanne – Office des permis de construire (OPC); CAMAC
+- **Triggers (EN):** new building, extension, extra storey, demolish the building, change the structure, new project
+- **Triggers (FR):** nouvelle construction, agrandissement, surélévation, démolition du bâtiment, transformation lourde, nouveau projet
+- **Rule:** No construction or demolition work that noticeably changes a site or building may start before it is authorised. Works start only once the permit is in force. Since 1 April 2026 the file must include a site-water plan (F20) and, when relevant, a waste plan (F24). Demolition or heavy renovation of housing also needs an LPPPL authorisation.
+- **Deadline:** Before works – the public inquiry alone lasts **30 days**, so this is a minimum; plan much longer.
+- **Who files:** Property owner (with architect / representative)
+- **Info to pre-fill:** address, parcel, owner, architect, nature of works, CAMAC questionnaires
+- **How to submit:** CAMAC form and specific questionnaires, electronic file to the OPC (fex.lausanne.ch drop zone).
+- **Source:** https://www.lausanne.ch/prestations/urbanisme/demande-permis-de-construire.html
+- **Status:** VERIFIED
+
+## F27 – Annonce du début et de la fin des travaux à l'ECA
+- **English:** Notify the cantonal building insurer (ECA) of start and end of works
+- **Level:** Canton of Vaud
+- **Authority:** ECA Vaud (and the commune)
+- **Triggers (EN):** works start on a permitted project, works finished, handover
+- **Triggers (FR):** début des travaux, fin des travaux, réception de l'ouvrage
+- **Rule:** Once a building permit is granted, inform the commune and the ECA of the start of works, and announce the end of works (then request the PH/PU, F09).
+- **Deadline:** At the start of works and at the end of works.
+- **Who files:** Project owner
+- **Info to pre-fill:** address, ECA building number, CAMAC number, start or end date
+- **How to submit:** To the ECA agency / commune – channel **TO VERIFY** on eca-vaud.ch.
+- **Source:** https://www.vd.ch/territoire-et-construction/permis-de-construire/les-differentes-etapes-de-la-procedure-du-permis-construire
+- **Status:** VERIFIED (obligation) / TO VERIFY (channel)
+
+## F28 – Macaron multizones entreprise (stationnement des véhicules d'entreprise)
+- **English:** Company parking permit for service vehicles
+- **Level:** City of Lausanne
+- **Authority:** Office de la circulation et du stationnement (Police)
+- **Triggers (EN):** company van parking, parking permit for our vans, parking fines near the site
+- **Triggers (FR):** macaron, stationnement des camionnettes, amendes de stationnement, parquer le véhicule de l'entreprise
+- **Rule:** Companies based in Lausanne can buy a multi-zone permit to park service vehicles longer on public ground (max 3 per company). It does not reserve a space and does not override temporary bans (works zones). Reserved spaces on a site need F01.
+- **Deadline:** None (optional).
+- **Who files:** Company
+- **Info to pre-fill:** company, address, vehicle plates
+- **How to submit:** Online form "macarons multizones – entreprise".
+- **Source:** https://www.lausanne.ch/macarons-stationnement-entreprises
+- **Status:** VERIFIED

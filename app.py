@@ -42,8 +42,10 @@ TZ = ZoneInfo("Europe/Zurich")
 
 # Notice periods (calendar days before the start date). Single source of truth:
 # the model no longer chooses this number.
-NOTICE_DAYS = {"F01": 2, "F02": 10, "F05": 14, "F08": 14}
-KNOWN_FORMS = {f"F{i:02d}" for i in range(1, 13)}
+NOTICE_DAYS = {"F02": 10, "F05": 14, "F08": 14, "F13": 10, "F14": 2, "F15": 7, "F25": 30, "F26": 30}
+WORKING_DAYS = {"F01": 10}  # counted Monday-Friday (public holidays not removed: check them)
+KNOWN_FORMS = {f"F{i:02d}" for i in range(1, 29)}
+FORM_RE = r"F(?:0[1-9]|1\d|2[0-8])"  # F01 to F28
 
 NUDGE = (
     "Check before finishing: your answer needs tool results you did not get. Call now: {missing}. "
@@ -76,15 +78,22 @@ def calculate_deadline(form_id=None, report_date=None, work_start_date=None, **_
     """Filing deadline for a form. Labelled values, and an error instead of a crash."""
     form_id = str(form_id or "").strip().upper()
     if form_id not in KNOWN_FORMS:
-        return {"form_id": form_id or "unknown", "error": "Unknown form ID. Use an ID from the library (F01 to F12)."}
+        return {"form_id": form_id or "unknown", "error": "Unknown form ID. Use an ID from the library (F01 to F28)."}
     today = _parse_date(report_date)
     if today is None:
         return {"form_id": form_id, "error": "report_date is missing or not a valid date (YYYY-MM-DD)."}
     start = _parse_date(work_start_date)
     if start is None:
         return {"form_id": form_id, "error": "work_start_date is missing or not a valid date (YYYY-MM-DD). Ask the site manager for the exact start date."}
-    notice = NOTICE_DAYS.get(form_id, 0)
-    deadline = start - timedelta(days=notice)
+    if form_id in WORKING_DAYS:
+        notice, deadline, left = f"{WORKING_DAYS[form_id]} working days", start, WORKING_DAYS[form_id]
+        while left:
+            deadline -= timedelta(days=1)
+            if deadline.weekday() < 5:
+                left -= 1
+    else:
+        notice = NOTICE_DAYS.get(form_id, 0)
+        deadline = start - timedelta(days=notice)
     days_left = (deadline - today).days
     priority = "🔴 URGENT" if days_left <= 2 else "🟠 SOON" if days_left <= 14 else "🟢 PLANNED"
     n = abs(days_left)
@@ -256,7 +265,7 @@ TOOL_DECLARATIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "form_id": {"type": "string", "description": "Form ID from the library, e.g. F01, F02, F05, F08"},
+                "form_id": {"type": "string", "description": "Form ID from the library (F01 to F28), e.g. F01, F02, F13"},
                 "report_date": {"type": "string", "description": "Report date (today), format YYYY-MM-DD"},
                 "work_start_date": {"type": "string", "description": "Date the work starts (or occupation date), format YYYY-MM-DD"},
             },
@@ -400,6 +409,30 @@ TRIGGERS = {
     "F11": ["accident", "blessé", "blessure", "chute", "ambulance", "hôpital", "hopital", "injured", "fell", "hospital", "cut his", "cut her",
             "s'est coupé", "verletzt", "ferito", "ferido", "herido"],
     "F12": ["travaux de nuit", "travail de nuit", "dimanche", "jour férié", "night work", "sunday work", "overnight"],
+    "F13": ["montage de la grue", "montage grue", "grue à tour", "monter l'échafaudage", "montage de l'échafaudage", "montage d'échafaudage",
+            "pose de l'échafaudage", "crane assembly", "tower crane", "erect the scaffold", "scaffolding goes up", "put up scaffolding"],
+    "F14": ["borne cadastrale", "borne de géomètre", "borne déplacée", "borne arrachée", "point cadastral", "point fixe", "survey marker", "boundary stone", "cadastral point"],
+    "F15": ["fouille", "tranchée", "creuser", "terrassement", "excavation", "sondage", "forage", "trench", "digging", "dig ", "test pit"],
+    "F16": ["tram", "métro", "metro", " m1", " m2", "leb", "rails", "ligne de contact", "trolleybus", "arrêt de bus", "bus stop", "tram tracks", "railway tracks"],
+    "F17": ["ancrage", "tirant", "paroi berlinoise", "paroi clouée", "ground anchor", "tie-back", "tieback", "soil nail", "berliner wall"],
+    "F18": ["courant de chantier", "électricité de chantier", "coffret provisoire", "tableau de chantier", "raccordement provisoire",
+            "site power", "temporary electricity", "power box", "distribution board"],
+    "F19": ["eau de chantier", "alimentation provisoire", "raccordement d'eau", "compteur d'eau", "branchement d'eau", "site water",
+            "temporary water", "water meter", "water connection", "hydrant"],
+    "F20": ["eaux de chantier", "pompage", "pomper", "eau dans la fouille", "eaux de lavage", "laitance", "boues", "égout",
+            "dewatering", "pumping", "pump out", "wash water", "slurry", "muddy water"],
+    "F21": ["nappe", "eaux souterraines", "rabattement", "groundwater", "water table"],
+    "F22": ["terre polluée", "terres polluées", "pollution du sol", "hydrocarbure", "mazout", "déchets enfouis", "ancienne décharge",
+            "citerne à mazout", "polluted soil", "contaminated", "smell of fuel", "hydrocarbon", "buried waste", "oil tank"],
+    "F23": ["terre végétale", "décapage", "matériaux terreux", "mouvement de terres", "évacuation des terres", "dioxine",
+            "topsoil", "strip the soil", "dioxin"],
+    "F24": ["déchets de chantier", "gravats", "tri des déchets", "bons d'évacuation", "construction waste", "rubble", "demolition waste"],
+    "F25": ["changement des fenêtres", "changer les fenêtres", "panneaux solaires", "pompe à chaleur", "cabane de jardin", "repeindre la façade",
+            "borne de recharge", "replace the windows", "solar panels", "heat pump", "garden shed", "ev charger"],
+    "F26": ["nouvelle construction", "agrandissement", "surélévation", "démolition du bâtiment", "démolir le bâtiment", "permis de construire",
+            "new building", "extension", "extra storey", "extra floor", "demolish the building", "building permit"],
+    "F27": ["début des travaux", "fin des travaux", "réception de l'ouvrage", "works finished", "handover"],
+    "F28": ["macaron", "amende de stationnement", "amendes de stationnement", "parking fine", "parking permit"],
 }
 
 
@@ -538,7 +571,7 @@ def run_agent(contents, outdoor):
                 # If the answer needs a tool that was never called, send the model back once to call it.
                 used = {t["name"] for t in tool_log}
                 missing = []
-                if re.search(r"\bF(0[1-9]|1[0-2])\b", text or "") and "calculate_deadline" not in used:
+                if re.search(rf"\b{FORM_RE}\b", text or "") and "calculate_deadline" not in used:
                     missing.append("calculate_deadline for every flagged form with a start, felling, removal or occupation date")
                 if outdoor and "get_site_weather" not in used:
                     missing.append("get_site_weather for each planned day of outdoor work (" + ", ".join(outdoor) + ")")
@@ -606,7 +639,7 @@ def _fix_dates(md, results):
 
 # Official page per form (from the Form Library "Source" lines; the page where the form is filed or downloaded).
 FORM_LINKS = {
-    "F01": "https://www.lausanne.ch/vie-pratique/mobilite/domaine-public/utilisation-temporaire-domaine-public",
+    "F01": "https://www.lausanne.ch/prestations/mobilite-et-amenagements-publics/demande-permis-utilisation-temporaire-domaine-public.html",
     "F02": "https://www-vali.lausanne.ch/dam/jcr:44d57b16-543c-4c61-b2d2-c0b66bc460b5/119_Avis_ouv_chantier_Rev_10_20251022.docx",
     "F03": "https://www.lausanne.ch/prestations/parcs-et-domaines/demande-abattage-arbres.html",
     "F04": "https://www.vd.ch/prestation/demander-une-autorisation-pour-un-abattage-ou-un-elagage-excedant-lentretien-courant-dun-arbre-remarquable-inscrit-a-linventaire-cantonal",
@@ -618,6 +651,22 @@ FORM_LINKS = {
     "F10": "https://www.vd.ch/dits/dgtl/dac/camac",
     "F11": "https://www.suva.ch/fr-ch/accident/apres-un-accident/declaration-de-sinistre-en-ligne",
     "F12": "https://www.lausanne.ch/vie-pratique/travail/protection-des-travailleurs/employeur/derogation-travail-nuit-ou-dimanche.html",
+    "F13": "https://www.lausanne.ch/prestations/mobilite-et-amenagements-publics/demande-permis-utilisation-temporaire-domaine-public.html",
+    "F14": "https://www.lausanne.ch/prestations/mobilite-et-amenagements-publics/demande-permis-utilisation-temporaire-domaine-public.html",
+    "F15": "https://www.lausanne.ch/prestations/cadastre/commande-plan-cadastral-des-conduites.html",
+    "F16": "https://www.lausanne.ch/dam/jcr:baa324f4-23e9-4170-b18b-b4f85ce95d5d/cadastre_adresses_bureaux_techniques.pdf",
+    "F17": "https://www.lausanne.ch/prestations/cadastre/ancrages.html",
+    "F18": "https://www.lausanne.ch/vie-pratique/energies-et-eau/services-industriels/partenaires/raccordements.html?tab=electricite",
+    "F19": "https://www.lausanne.ch/prestations/eau/demande-raccordement-reseau-eau.html",
+    "F20": "https://www.lausanne.ch/eauxdechantier",
+    "F21": "https://www.vd.ch/environnement/eaux/eaux-souterraines/constructions-dans-les-secteurs-particulierement-menaces-au-s-pp",
+    "F22": "https://www.lexfind.ch/tol/24003/de",
+    "F23": "https://www.vd.ch/environnement/sols/pollution-des-sols-aux-dioxines/gestion-des-materiaux-terreux",
+    "F24": "https://www.vd.ch/themes/environnement/dechets/boite-outils-dechets",
+    "F25": "https://www.lausanne.ch/en/prestations/urbanisme/travaux-non-soumis-a-permis-de-construire.html",
+    "F26": "https://www.lausanne.ch/prestations/urbanisme/demande-permis-de-construire.html",
+    "F27": "https://www.vd.ch/territoire-et-construction/permis-de-construire/les-differentes-etapes-de-la-procedure-du-permis-construire",
+    "F28": "https://www.lausanne.ch/macarons-stationnement-entreprises",
 }
 _LINKS_TITLE = {"French": "📎 Ouvrir les formulaires officiels", "German": "📎 Offizielle Formulare öffnen",
                 "Italian": "📎 Aprire i moduli ufficiali", "Portuguese": "📎 Abrir os formulários oficiais",
@@ -628,13 +677,13 @@ def _add_form_links(md, lang=None):
     """Makes each form ID in the alerts table clickable and adds a list of official links at the end.
     Links come from code, not from the model, so they cannot be mistyped."""
     table = "\n".join(l for l in md.split("\n") if l.lstrip().startswith("|"))
-    ids = [f for f in dict.fromkeys(re.findall(r"\bF(?:0[1-9]|1[0-2])\b", table)) if f in FORM_LINKS]
+    ids = [f for f in dict.fromkeys(re.findall(rf"\b{FORM_RE}\b", table)) if f in FORM_LINKS]
     if not ids:
         return md
     lines = []
     for line in md.split("\n"):
         if line.lstrip().startswith("|"):
-            line = re.sub(r"(?<![\[\w])(F(?:0[1-9]|1[0-2]))\b(?!\])", lambda m: f"[{m.group(1)}]({FORM_LINKS[m.group(1)]})", line, count=1)
+            line = re.sub(rf"(?<![\[\w])({FORM_RE})\b(?!\])", lambda m: f"[{m.group(1)}]({FORM_LINKS[m.group(1)]})", line, count=1)
         lines.append(line)
     md = "\n".join(lines)
     title = _LINKS_TITLE.get(lang, "📎 Open the official forms")
