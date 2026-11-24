@@ -515,6 +515,9 @@ def _past_turns(history):
         meta = (msg.get("metadata") if isinstance(msg, dict) else getattr(msg, "metadata", None)) or {}
         text = _text_of(msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", "")).strip()
         if role in ("user", "assistant") and text and not meta.get("title"):
+            if role == "assistant":  # links and email drafts added by code are not sent back to the model
+                text = re.split(r"\n\n\*\*📝", text)[0]
+                text = re.sub(r"\]\((?:https?|mailto):[^)]*\)", "]", text)
             turns.append((role, text))
     return turns[-MAX_HISTORY_MESSAGES:]
 
@@ -700,9 +703,10 @@ FORM_FILL = {
     "F28": ("online", "https://www.lausanne.ch/de/prestations/police/demande-macaron-pour-entreprises/formulaire-macaron-multizones-entreprises.html"),
 }
 _KIND = {  # label per kind and language
-    "English": {"online": "online form", "pdf": "PDF form", "word": "Word form", "email": "email (pre-filled)", "info": "info page"},
+    "English": {"online": "online form", "pdf": "PDF form", "word": "Word form", "email": "email (pre-filled)", "info": "info page",
+                "app": "mail app", "copy": "Email text to copy"},
     "French": {"online": "formulaire en ligne", "pdf": "formulaire PDF", "word": "formulaire Word", "email": "e-mail (pré-rempli)",
-               "info": "page d'information"},
+               "info": "page d'information", "app": "app de messagerie", "copy": "Texte de l'e-mail à copier"},
 }
 _TITLES = {
     "English": ("📝 Fill in or send", "ℹ️ Official pages"),
@@ -737,19 +741,32 @@ _ATTACH = {
 }
 
 
-def _mailto(address, fid, md, site):
+def _email_parts(address, fid, md, site):
     subject = f"{_form_title(fid)}" + (f" – {site}" if site else "")
     body = ("Bonjour,\n\n"
             f"Nous vous adressons la demande / l'annonce suivante : {_form_title(fid)}.\n\n"
             + (_draft_block(md, fid) or "[compléter les informations]")
             + (f"\n\n{_ATTACH[fid]}" if fid in _ATTACH else "")
             + "\n\nMeilleures salutations,\n[nom, entreprise, téléphone]")
-    return f"mailto:{address}?subject={quote(subject)}&body={quote(body)}"
+    return address, subject, body
+
+
+def _compose_links(address, subject, body):
+    """mailto: only works with a desktop mail app, so web-mail compose links come first (revision log #22)."""
+    q = lambda t: quote(t, safe="")
+    return {
+        "Gmail": f"https://mail.google.com/mail/?view=cm&fs=1&to={q(address)}&su={q(subject)}&body={q(body)}",
+        "Outlook": f"https://outlook.office.com/mail/deeplink/compose?to={q(address)}&subject={q(subject)}&body={q(body)}",
+        "app": f"mailto:{address}?subject={q(subject)}&body={q(body)}",
+    }
 
 
 def _fill_link(fid, md, site):
     kind, target = FORM_FILL.get(fid, ("info", FORM_LINKS[fid]))
-    return kind, (_mailto(target, fid, md, site) if kind == "email" else target)
+    if kind == "email":
+        parts = _email_parts(target, fid, md, site)
+        return kind, _compose_links(*parts)["Gmail"], parts
+    return kind, target, None
 
 
 def _add_form_links(md, lang=None):
@@ -772,9 +789,19 @@ def _add_form_links(md, lang=None):
     md = "\n".join(lines)
     fill_title, info_title = _TITLES.get(lang, _TITLES["English"])
     kinds = _KIND.get(lang, _KIND["English"])
-    fill_line = " · ".join(f"[{f} – {kinds[k]}]({u})" for f, (k, u) in fills.items())
-    info_line = " · ".join(f"[{f}]({FORM_LINKS[f]})" for f in ids)
-    return md + f"\n\n**{fill_title}:** {fill_line}\n\n**{info_title}:** {info_line}"
+    items, emails = [], []
+    for f, (k, u, parts) in fills.items():
+        if parts:
+            links = _compose_links(*parts)
+            items.append(f"{f} – ✉️ [Gmail]({links['Gmail']}) / [Outlook]({links['Outlook']}) / [{kinds['app']}]({links['app']})")
+            emails.append((f, parts))
+        else:
+            items.append(f"[{f} – {kinds[k]}]({u})")
+    md += f"\n\n**{fill_title}:** " + " · ".join(items)
+    md += f"\n\n**{info_title}:** " + " · ".join(f"[{f}]({FORM_LINKS[f]})" for f in ids)
+    for f, (to, subject, body) in emails:  # copy-ready text: works even without any mail account
+        md += f"\n\n<details><summary>✉️ {kinds['copy']} – {f}</summary>\n\n```text\nÀ / To: {to}\nObjet / Subject: {subject}\n\n{body}\n```\n\n</details>"
+    return md
 
 
 def _fix_tables(md):
