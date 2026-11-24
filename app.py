@@ -288,10 +288,28 @@ TOOL_DECLARATIONS = [
 
 
 # ---------------------------------------------------------------- model call
-def call_gemini(contents, models):
-    """One call to Gemini. Tries the models in order until one answers."""
+_SKIP_SIG = "skip_thought_signature_validator"  # Google's documented value for history made by another model
+
+
+def _for_model(contents, m, made_by):
+    """Gemini 3 attaches thought signatures to its function calls. If the turn switches to another model
+    (because the first one is overloaded), those signatures are replaced so the new model accepts the history."""
+    if made_by is None or (made_by == m and made_by != "mixed"):
+        return contents
+    out = json.loads(json.dumps(contents))
+    for c in out:
+        for p in c.get("parts", []):
+            if "thoughtSignature" in p:
+                p["thoughtSignature"] = _SKIP_SIG
+    return out
+
+
+def call_gemini(contents, models, made_by=None):
+    """One call to Gemini. Tries the models in order until one answers; overloads (503) and timeouts
+    are usually short spikes, so it makes 3 rounds with growing waits (revision log #19)."""
     last_err = ""
-    for attempt in range(2):
+    waits = [3, 8]
+    for attempt in range(3):
         for m in models:
             try:
                 r = requests.post(
@@ -299,7 +317,7 @@ def call_gemini(contents, models):
                     headers={"Content-Type": "application/json", "x-goog-api-key": API_KEY},
                     json={
                         "systemInstruction": {"parts": [{"text": INSTRUCTIONS}]},
-                        "contents": contents,
+                        "contents": _for_model(contents, m, made_by),
                         "tools": [{"functionDeclarations": TOOL_DECLARATIONS}],
                         "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
                     },
@@ -319,16 +337,18 @@ def call_gemini(contents, models):
                 return j, m
             last_err = (j.get("error") or {}).get("message") or f"HTTP {r.status_code}"
             print(f"[ChantierPilot] fallback: {m} -> HTTP {r.status_code}: {str(last_err)[:300]}", flush=True)
-            if r.status_code in (400, 401, 403):
+            key_problem = r.status_code in (401, 403) or (r.status_code == 400 and "api key" in str(last_err).lower())
+            if key_problem:
                 # Do not show Google's raw message to visitors; log it for the maintainer.
                 print(f"[ChantierPilot] Gemini refused the request ({r.status_code}): {last_err}", flush=True)
                 raise RuntimeError("The service is not configured correctly (API key). Please tell the maintainers.")
-        if attempt == 0:
-            # Free-tier quota (HTTP 429) is per minute: wait longer before the second round.
-            time.sleep(20 if "429" in str(last_err) or "quota" in str(last_err).lower() else 4)
+        if attempt < 2:
+            # Free-tier quota (HTTP 429) is per minute: wait longer before the next round.
+            quota = "429" in str(last_err) or "quota" in str(last_err).lower()
+            time.sleep(20 if quota else waits[attempt])
     if "quota" in str(last_err).lower():
         raise RuntimeError("The free AI quota is used up for the moment. Please wait about a minute and try again.")
-    raise RuntimeError("All models are busy or unavailable right now. Try again in a few minutes.")
+    raise RuntimeError("Google's AI models are overloaded right now (high demand). Please try again in a minute.")
 
 
 
@@ -489,13 +509,18 @@ def build_contents(message, history, report_date):
 def run_agent(contents, outdoor):
     """Runs the model + tools loop. Yields ("model", name), ("tool", name, args, result) and finally
     ("final", text) or ("error", message)."""
-    tool_log, models, nudged = [], MODELS, False
+    tool_log, models, nudged, made_by = [], MODELS, False, None
     try:
         for _ in range(MAX_TOOL_ROUNDS):
-            j, m = call_gemini(contents, models)
+            j, m = call_gemini(contents, models, made_by)
             if models is MODELS:
                 yield ("model", m)
-            models = [m]  # keep the same model for the whole turn
+            elif m != made_by and made_by != "mixed":
+                yield ("model", f"{m} (switched: {made_by} overloaded)")
+            # After a switch the history holds turns from two models: always convert it from then on.
+            made_by = m if made_by in (None, m) else "mixed"
+            # Prefer the same model for the rest of the turn, but fall back to the others if it gets overloaded.
+            models = [m] + [x for x in MODELS if x != m]
             content = j["candidates"][0]["content"]
             parts = content.get("parts", [])
             calls = [p["functionCall"] for p in parts if "functionCall" in p]
