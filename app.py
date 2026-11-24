@@ -571,14 +571,51 @@ def _fix_dates(md, results):
     return md
 
 
-def _tidy(md, results=()):
-    """Small markdown repairs for model glitches (e.g. a list item split before a comma)."""
+# Official page per form (from the Form Library "Source" lines; the page where the form is filed or downloaded).
+FORM_LINKS = {
+    "F01": "https://www.lausanne.ch/vie-pratique/mobilite/domaine-public/utilisation-temporaire-domaine-public",
+    "F02": "https://www-vali.lausanne.ch/dam/jcr:44d57b16-543c-4c61-b2d2-c0b66bc460b5/119_Avis_ouv_chantier_Rev_10_20251022.docx",
+    "F03": "https://www.lausanne.ch/prestations/parcs-et-domaines/demande-abattage-arbres.html",
+    "F04": "https://www.vd.ch/prestation/demander-une-autorisation-pour-un-abattage-ou-un-elagage-excedant-lentretien-courant-dun-arbre-remarquable-inscrit-a-linventaire-cantonal",
+    "F05": "https://www.suva.ch/fr-ch/prevention/par-danger/materiaux-rayonnements-et-situations-a-risque/amiante/les-entreprises-de-desamiantage/annoncer-un-desamiantage",
+    "F06": "https://www.suva.ch/fr-ch/prevention/par-danger/materiaux-rayonnements-et-situations-a-risque/amiante/les-entreprises-de-desamiantage/annoncer-un-desamiantage",
+    "F07": "https://www.vd.ch/territoire-et-construction/amiante-1/categories/entreprises-dassainissement",
+    "F08": "https://www.suva.ch/fr-ch/prevention/conseil-cours-et-offres/annoncer-les-travaux-de-construction",
+    "F09": "https://www.lausanne.ch/prestations/urbanisme/permis-d-habiter-ou-utiliser.html",
+    "F10": "https://www.vd.ch/dits/dgtl/dac/camac",
+    "F11": "https://www.suva.ch/fr-ch/accident/apres-un-accident/declaration-de-sinistre-en-ligne",
+    "F12": "https://www.lausanne.ch/vie-pratique/travail/protection-des-travailleurs/employeur/derogation-travail-nuit-ou-dimanche.html",
+}
+_LINKS_TITLE = {"French": "📎 Ouvrir les formulaires officiels", "German": "📎 Offizielle Formulare öffnen",
+                "Italian": "📎 Aprire i moduli ufficiali", "Portuguese": "📎 Abrir os formulários oficiais",
+                "Spanish": "📎 Abrir los formularios oficiales"}
+
+
+def _add_form_links(md, lang=None):
+    """Makes each form ID in the alerts table clickable and adds a list of official links at the end.
+    Links come from code, not from the model, so they cannot be mistyped."""
+    table = "\n".join(l for l in md.split("\n") if l.lstrip().startswith("|"))
+    ids = [f for f in dict.fromkeys(re.findall(r"\bF(?:0[1-9]|1[0-2])\b", table)) if f in FORM_LINKS]
+    if not ids:
+        return md
+    lines = []
+    for line in md.split("\n"):
+        if line.lstrip().startswith("|"):
+            line = re.sub(r"(?<![\[\w])(F(?:0[1-9]|1[0-2]))\b(?!\])", lambda m: f"[{m.group(1)}]({FORM_LINKS[m.group(1)]})", line, count=1)
+        lines.append(line)
+    md = "\n".join(lines)
+    title = _LINKS_TITLE.get(lang, "📎 Open the official forms")
+    return md + f"\n\n**{title}:** " + " · ".join(f"[{f}]({FORM_LINKS[f]})" for f in ids)
+
+
+def _tidy(md, results=(), lang=None):
+    """Small markdown repairs for model glitches (e.g. a list item split before a comma), then form links."""
     md = _fix_dates(md, results)
     md = re.sub(r"\b1 days\b", "1 day", md)
     md = re.sub(r"\b1 jours\b", "1 jour", md)
     md = re.sub(r"\n\s*\n(\s*[,;])", r"\1", md)   # "worker name\n\n, date" -> "worker name, date"
     md = re.sub(r"\n(\s*[,;] )", r"\1", md)
-    return md.strip()
+    return _add_form_links(md.strip(), lang)
 
 
 def _save_report(md):
@@ -633,7 +670,7 @@ def chat(message, history, request: gr.Request = None):
             if event[0] == "error":
                 yield [done, *tools, gr.ChatMessage(role="assistant", content=f"⚠️ {event[1]}")], gr.update(visible=False)
                 return
-            answer = _tidy(event[1], results)
+            answer = _tidy(event[1], results, detect_language(message))
             yield [done, *tools, gr.ChatMessage(role="assistant", content=answer)], \
                 gr.update(value=_save_report(f"Report date: {report_date}\n\n{answer}"), visible=True)
             return
@@ -654,7 +691,7 @@ def generate(note, report_date=None, request=None):
         if event[0] == "tool":
             tool_log.append(event[1:])
         elif event[0] == "final":
-            final = _tidy(event[1], [t[2] for t in tool_log])
+            final = _tidy(event[1], [t[2] for t in tool_log], detect_language(note))
         elif event[0] == "error":
             return f"❌ {event[1]}", gr.update(visible=False)
     md = final + f"\n\n<details><summary>🔧 Tool calls ({len(tool_log)})</summary>\n\n" + (
