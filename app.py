@@ -690,9 +690,33 @@ def _add_form_links(md, lang=None):
     return md + f"\n\n**{title}:** " + " · ".join(f"[{f}]({FORM_LINKS[f]})" for f in ids)
 
 
+def _fix_tables(md):
+    """Rejoins a table row the model broke across lines (e.g. '| :--- | :---' + blank line + '| :--- |'),
+    which otherwise makes the whole table show as raw text."""
+    out = []
+    for line in md.split("\n"):
+        s = line.strip()
+        if s.startswith("|") and out:
+            j = len(out) - 1
+            while j >= 0 and not out[j].strip():
+                j -= 1
+            prev = out[j].strip() if j >= 0 else ""
+            if prev.startswith("|") and not prev.endswith("|"):
+                out[j] = out[j].rstrip() + " " + s
+                del out[j + 1:]
+                continue
+        out.append(line)
+    # A separator row (| --- | --- |) must have as many cells as the header above it.
+    for i in range(1, len(out)):
+        if re.fullmatch(r"\s*\|[\s:\-|]+\|?\s*", out[i]) and "-" in out[i] and out[i - 1].strip().startswith("|"):
+            cols = out[i - 1].strip().strip("|").count("|") + 1
+            out[i] = "|" + " --- |" * cols
+    return "\n".join(out)
+
+
 def _tidy(md, results=(), lang=None):
     """Small markdown repairs for model glitches (e.g. a list item split before a comma), then form links."""
-    md = _fix_dates(md, results)
+    md = _fix_tables(_fix_dates(md, results))
     md = re.sub(r"\b1 days\b", "1 day", md)
     md = re.sub(r"\b1 jours\b", "1 jour", md)
     md = re.sub(r"\n\s*\n(\s*[,;])", r"\1", md)   # "worker name\n\n, date" -> "worker name, date"
