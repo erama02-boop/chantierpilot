@@ -210,7 +210,7 @@ Each entry uses the same fields so the assistant can match triggers and pre-fill
 - **Rule:** Employers who need workers on Lausanne territory at night or on Sundays must request a derogation. "Temporary" means a defined intervention of at most 6 months. Regular/periodic night or Sunday work is a federal competence instead. Fees: CHF 40 (7 days), CHF 80 (up to 3 months), CHF 240 (up to 1 year).
 - **Deadline:** Before the night/Sunday work (no fixed notice period found).
 - **Who files:** Employer
-- **How to submit:** Online form of the Inspection du travail Lausanne.
+- **How to submit:** Online form of the Inspection du travail Lausanne. Construction and related-sector companies covered by a collective labour agreement must first contact their joint professional commission (commission paritaire).
 - **Separate noise rules:** Noise limits and quiet hours for building sites are set by the Règlement général de police (RGP) and federal construction-noise guidance – **TO VERIFY** with the City before relying on specific hours.
 - **Source:** https://www.lausanne.ch/vie-pratique/travail/protection-des-travailleurs/employeur/derogation-travail-nuit-ou-dimanche.html
 - **Status:** VERIFIED (labour-law permit) / TO VERIFY (noise hours)
@@ -351,9 +351,9 @@ Each entry uses the same fields so the assistant can match triggers and pre-fill
 - **Deadline:** **Without delay** (the discovery date is the deadline).
 - **Who files:** Project owner or contractor
 - **Info to pre-fill:** site address, parcel, what was found, where, approximate volume, measures taken, date of discovery
-- **How to submit:** Report to the DGE – contact channel **TO VERIFY** on vd.ch (sites pollués).
+- **How to submit:** Report to the DGE (Direction générale de l'environnement): info.dge@vd.ch, tel. 021 316 43 60.
 - **Source:** https://www.lexfind.ch/tol/24003/de
-- **Status:** VERIFIED (obligation) / TO VERIFY (channel)
+- **Status:** VERIFIED
 
 ## F23 – Diagnostic des matériaux terreux (périmètre dioxines, DCPE 877)
 - **English:** Soil pollution diagnosis in the Lausanne dioxin area
