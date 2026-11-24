@@ -33,7 +33,11 @@ API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 # gemini-3.8-flash / gemini-3.5-flash-lite), and the "-latest" aliases were overloaded (timeouts / HTTP 503).
 # Full model first; then the lite model, which answers fast (the code guards keep it accurate), before the
 # often-overloaded "-latest" alias (revision log #16).
-MODELS = ["gemini-3.8-flash", "gemini-3.5-flash-lite", "gemini-flash-latest", "gemini-flash-lite-latest"]
+MISTRAL_KEY = os.environ.get("MISTRAL_API_KEY", "").strip()
+MISTRAL_MODEL = os.environ.get("MISTRAL_MODEL", "mistral-small-latest")
+# Backup provider (revision log #23): Mistral is tried after the two main Gemini models when it has a key.
+MODELS = (["gemini-3.8-flash", "gemini-3.5-flash-lite"] + ([MISTRAL_MODEL] if MISTRAL_KEY else [])
+          + ["gemini-flash-latest", "gemini-flash-lite-latest"])
 INSTRUCTIONS = (Path(__file__).parent / "instructions.md").read_text(encoding="utf-8")
 MAX_NOTE_CHARS = 5000          # longer notes are refused
 MAX_TOOL_ROUNDS = 8            # same limit as v1
@@ -311,9 +315,87 @@ def _for_model(contents, m, made_by):
     out = json.loads(json.dumps(contents))
     for c in out:
         for p in c.get("parts", []):
-            if "thoughtSignature" in p:
+            if "thoughtSignature" in p or "functionCall" in p:  # calls made by Mistral have no signature
                 p["thoughtSignature"] = _SKIP_SIG
     return out
+
+
+def _to_mistral(contents):
+    """Gemini 'contents' -> Mistral chat messages. Tool-call ids are made up in order (Mistral wants 9 letters/digits)."""
+    msgs, pending, n = [{"role": "system", "content": INSTRUCTIONS}], [], 0
+    for c in contents:
+        parts = c.get("parts", [])
+        if c.get("role") == "model":
+            calls = []
+            for p in parts:
+                if "functionCall" in p:
+                    n += 1
+                    cid = f"c{n:08d}"
+                    calls.append({"id": cid, "type": "function", "function": {
+                        "name": p["functionCall"]["name"], "arguments": json.dumps(p["functionCall"].get("args", {}))}})
+                    pending.append(cid)
+            text = "".join(p.get("text", "") for p in parts if "text" in p)
+            msg = {"role": "assistant", "content": text}
+            if calls:
+                msg["tool_calls"] = calls
+            msgs.append(msg)
+        else:
+            text = "".join(p.get("text", "") for p in parts if "text" in p)
+            for p in parts:
+                if "functionResponse" in p:
+                    fr = p["functionResponse"]
+                    msgs.append({"role": "tool", "name": fr["name"], "tool_call_id": pending.pop(0) if pending else "c00000000",
+                                 "content": json.dumps(fr.get("response", {}), ensure_ascii=False)})
+            if text:
+                msgs.append({"role": "user", "content": text})
+    return msgs
+
+
+def _from_mistral(j):
+    """Mistral answer -> the Gemini answer shape the rest of the app reads."""
+    msg = ((j.get("choices") or [{}])[0]).get("message") or {}
+    parts = []
+    if msg.get("content"):
+        content = msg["content"]
+        if isinstance(content, list):
+            content = "".join(x.get("text", "") for x in content if isinstance(x, dict))
+        parts.append({"text": content})
+    for tc in msg.get("tool_calls") or []:
+        try:
+            args = json.loads(tc["function"].get("arguments") or "{}")
+        except (ValueError, TypeError):
+            args = {}
+        parts.append({"functionCall": {"name": tc["function"]["name"], "args": args}})
+    return {"candidates": [{"content": {"role": "model", "parts": parts}}]} if parts else {}
+
+
+def _post(m, contents, made_by, timeout):
+    """One HTTP call to the model m (Gemini or Mistral). Returns (response, json in Gemini shape)."""
+    if m.startswith("mistral"):
+        r = requests.post(
+            "https://api.mistral.ai/v1/chat/completions",
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {MISTRAL_KEY}"},
+            json={"model": m, "messages": _to_mistral(contents), "temperature": 0.2, "max_tokens": 8192,
+                  "tools": [{"type": "function", "function": d} for d in TOOL_DECLARATIONS], "tool_choice": "auto"},
+            timeout=timeout,
+        )
+        j = r.json()
+        if r.ok:
+            return r, _from_mistral(j)
+        err = j.get("message") or j.get("detail") or j.get("error") or f"HTTP {r.status_code}"
+        return r, {"error": {"message": str(err)}}
+    r = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+        headers={"Content-Type": "application/json", "x-goog-api-key": API_KEY},
+        json={
+            "systemInstruction": {"parts": [{"text": INSTRUCTIONS}]},
+            "contents": _for_model(contents, m, made_by),
+            "tools": [{"functionDeclarations": TOOL_DECLARATIONS}],
+            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
+        },
+        timeout=timeout,
+    )
+    return r, r.json()
 
 
 def call_gemini(contents, models, made_by=None):
@@ -328,18 +410,7 @@ def call_gemini(contents, models, made_by=None):
             if left < 5:  # do not keep visitors waiting for minutes when Google is overloaded everywhere
                 break
             try:
-                r = requests.post(
-                    f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
-                    headers={"Content-Type": "application/json", "x-goog-api-key": API_KEY},
-                    json={
-                        "systemInstruction": {"parts": [{"text": INSTRUCTIONS}]},
-                        "contents": _for_model(contents, m, made_by),
-                        "tools": [{"functionDeclarations": TOOL_DECLARATIONS}],
-                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 8192},
-                    },
-                    timeout=min(TIMEOUT_S, left),
-                )
-                j = r.json()
+                r, j = _post(m, contents, made_by, min(TIMEOUT_S, left))
             except requests.Timeout:
                 last_err = f"{m}: no answer after {TIMEOUT_S} s (model overloaded)"
                 print(f"[ChantierPilot] fallback: {last_err}", flush=True)
@@ -353,7 +424,8 @@ def call_gemini(contents, models, made_by=None):
                 return j, m
             last_err = (j.get("error") or {}).get("message") or f"HTTP {r.status_code}"
             print(f"[ChantierPilot] fallback: {m} -> HTTP {r.status_code}: {str(last_err)[:300]}", flush=True)
-            key_problem = r.status_code in (401, 403) or (r.status_code == 400 and "api key" in str(last_err).lower())
+            key_problem = (r.status_code in (401, 403) or (r.status_code == 400 and "api key" in str(last_err).lower())) \
+                and not m.startswith("mistral")  # a bad backup key only skips the backup
             if key_problem:
                 # Do not show Google's raw message to visitors; log it for the maintainer.
                 print(f"[ChantierPilot] Gemini refused the request ({r.status_code}): {last_err}", flush=True)

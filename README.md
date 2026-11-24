@@ -54,7 +54,7 @@ It works as a chat: you can answer its questions, correct a date or ask "can we 
 - Notes are capped at 5,000 characters; 30 reports per visitor per hour (env `RATE_LIMIT_PER_HOUR`).
 
 ## Hosting
-Deployed free on Render (web service, free instance) from this GitHub repo; the key is the `GEMINI_API_KEY` environment variable. Free instances sleep after 15 minutes without traffic and take about a minute to wake.
+Deployed free on Render (web service, free instance) from this GitHub repo; the key is the `GEMINI_API_KEY` environment variable. Optional backup: if `MISTRAL_API_KEY` is set, Mistral (`mistral-small-latest`) answers when the main Gemini models are overloaded. Free instances sleep after 15 minutes without traffic and take about a minute to wake.
 
 ## Run locally
 ```bash
