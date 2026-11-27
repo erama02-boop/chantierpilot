@@ -33,18 +33,18 @@ It works as a chat: you can answer its questions, correct a date or ask "can we 
 |---|---|
 | Model | Google Gemini (gemini-3.8-flash, then 3 fallbacks), temperature 0.2 |
 | Instructions | `instructions.md` (role, steps, output format, rules, security rule) |
-| Knowledge | Form Library v3 (F01–F28: City of Lausanne, Canton of Vaud, Suva, SiL, tl), **injected into the context** (no retrieval) |
+| Knowledge | Form Library v4 (F01–F32: City of Lausanne, Canton of Vaud, Suva, SiL, tl, FOCA, SEM), **injected into the context** (no retrieval) |
 | Tool 1 | `calculate_deadline` – deterministic date arithmetic; notice period looked up per form |
 | Tool 2 | `get_site_weather` – weather go/no-go: live Lausanne forecast (Open-Meteo, backup MET Norway), a GO / CAUTION / NO-GO verdict per activity (crane, concrete, roofing, scaffolding, excavation, facade) and the next GO day |
 | Interface | Gradio chat: streams its progress and shows each tool result as it happens; follow-up questions update the report; last report downloadable as Markdown; API endpoints `/chat` and `/generate` |
 
-**Why context injection and not RAG:** the whole library is 12 short entries (~25 KB). It fits easily in the context window, so the model always sees every form. Retrieval would add a failure mode (missing the right form) without any benefit at this size. We would switch to retrieval if the library grew to hundreds of regulations.
+**Why context injection and not RAG:** the whole library is 32 entries (about 50 KB with the instructions, roughly 13K tokens). It fits easily in the context window, so the model always sees every form. Retrieval would add a failure mode (missing the right form) without any benefit at this size. We would switch to retrieval if the library grew to hundreds of regulations or several communes.
 
 **Why Gemini and not Mistral (the course reference platform):** Gemini's free tier and function calling worked reliably from a plain web page during development, and the course allows any platform that meets the requirements. The architecture (instructions + context knowledge + custom function tools) is the same as a Mistral Agent with function calling.
 
 ## Limits
 - Covers only the City of Lausanne (+ Vaud and Suva obligations there). Other communes get the daily log only.
-- Items marked **TO VERIFY** (F10 threshold, F12 noise hours, the submission channel of F13, F16 lead time, F22 and F27 channels) are flagged as such in answers.
+- Items marked **TO VERIFY** (F10 threshold, F12 noise hours, the submission channel of F13, F16 lead time, F22 and F27 channels, F29 crane height thresholds, F30 construction exemption, F32 channel) are flagged as such in answers.
 - Weather thresholds are indicative, not legal limits. Forecasts cover 16 days.
 - The model can still misread a note: the site manager reviews every draft; the app never submits anything.
 
