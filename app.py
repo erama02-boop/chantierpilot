@@ -927,6 +927,82 @@ def _add_form_links(md, lang=None):
     return md
 
 
+# ---------------------------------------------------------------- official form files attached to the answer
+# The server downloads the official PDF / Word form of each flagged form and attaches it to the chat answer,
+# so the site manager gets the file itself, not only a link. Files are fetched from the official sites
+# (never stored in the repo), cached for a day, and only kept if they really are a PDF or Word file.
+FORM_FILES = {f: [(url, None)] for f, (kind, url) in FORM_FILL.items() if kind in ("pdf", "word")}
+FORM_FILES["F11"] = [
+    ("https://www.suva.ch/fr-ch/download/document/formulaire--declaration-d-accident-bagatelle-laa--913.f",
+     "F11_Suva_913F_accident_bagatelle.pdf"),
+    ("https://www.suva.ch/fr-ch/download/dokument/formular--schadenmeldung-uvg--109.F",
+     "F11_Suva_109F_declaration_sinistre.pdf"),
+]
+FILE_CACHE_DIR = Path(tempfile.gettempdir()) / "chantierpilot_forms"
+FILE_CACHE_S = 24 * 3600
+_MAGIC = {b"%PDF": ".pdf", b"PK\x03\x04": ".docx"}
+_ATTACH_TITLE = {
+    "English": "📎 Official forms to fill in (downloaded today from the official sites)",
+    "French": "📎 Formulaires officiels à remplir (téléchargés aujourd'hui sur les sites officiels)",
+    "German": "📎 Offizielle Formulare zum Ausfüllen (heute von den offiziellen Seiten geladen)",
+    "Italian": "📎 Moduli ufficiali da compilare (scaricati oggi dai siti ufficiali)",
+    "Portuguese": "📎 Formulários oficiais para preencher (descarregados hoje dos sites oficiais)",
+    "Spanish": "📎 Formularios oficiales para rellenar (descargados hoy de los sitios oficiales)",
+}
+
+
+def _file_name(fid, url, ext):
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "_", Path(url.split("?")[0]).stem)[:50].strip("_") or "formulaire"
+    return f"{fid}_{stem}{ext}"
+
+
+def _download_form(fid, url, name=None):
+    """Path of a cached copy of one official form file, or None if it is not a real PDF/Word file."""
+    folder = FILE_CACHE_DIR / re.sub(r"[^A-Za-z0-9]+", "_", url)[-120:]  # one folder per URL, clean file name inside
+    folder.mkdir(parents=True, exist_ok=True)
+    for old in folder.iterdir():
+        if time.time() - old.stat().st_mtime < FILE_CACHE_S:
+            return None if old.name == "NOFILE" else str(old)
+        old.unlink(missing_ok=True)
+    try:
+        r = requests.get(url, timeout=15, headers={"User-Agent": METNO_UA}, allow_redirects=True)
+        data = r.content if r.ok else b""
+    except Exception as e:  # network problem: the link line still gives the official page
+        print(f"[ChantierPilot] form file {fid}: download failed ({type(e).__name__})", flush=True)
+        return None
+    ext = next((x for magic, x in _MAGIC.items() if data.startswith(magic)), None)
+    if not ext:
+        print(f"[ChantierPilot] form file {fid}: not a PDF/Word file (HTTP {getattr(r, 'status_code', '?')}), link only", flush=True)
+        (folder / "NOFILE").touch()  # don't ask again for a day
+        return None
+    path = folder / (name or _file_name(fid, url, ext))
+    path.write_bytes(data)
+    return str(path)
+
+
+def form_files(md):
+    """(form ID, file path) for every flagged form in the alerts table that has an official file."""
+    table = "\n".join(l for l in md.split("\n") if l.lstrip().startswith("|"))
+    ids = [f for f in dict.fromkeys(re.findall(rf"\b{FORM_RE}\b", table)) if f in FORM_FILES]
+    out = []
+    for f in ids:
+        for url, name in FORM_FILES[f]:
+            p = _download_form(f, url, name)
+            if p:
+                out.append((f, p))
+    return out
+
+
+def _file_messages(md, lang):
+    files = form_files(md)
+    if not files:
+        return []
+    msgs = [gr.ChatMessage(role="assistant", content=f"**{_ATTACH_TITLE.get(lang, _ATTACH_TITLE['English'])}**")]
+    for fid, p in files:
+        msgs.append(gr.ChatMessage(role="assistant", content={"path": p, "alt_text": Path(p).name}))
+    return msgs
+
+
 def _fix_tables(md):
     """Rejoins a table row the model broke across lines (e.g. '| :--- | :---' + blank line + '| :--- |'),
     which otherwise makes the whole table show as raw text."""
@@ -1013,9 +1089,14 @@ def chat(message, history, request: gr.Request = None):
             if event[0] == "error":
                 yield [done, *tools, gr.ChatMessage(role="assistant", content=f"⚠️ {event[1]}")], gr.update(visible=False)
                 return
-            answer = _tidy(event[1], results, detect_language(message))
-            yield [done, *tools, gr.ChatMessage(role="assistant", content=answer)], \
-                gr.update(value=_save_report(f"Report date: {report_date}\n\n{answer}"), visible=True)
+            lang = detect_language(message)
+            answer = _tidy(event[1], results, lang)
+            report = gr.update(value=_save_report(f"Report date: {report_date}\n\n{answer}"), visible=True)
+            msgs = [done, *tools, gr.ChatMessage(role="assistant", content=answer)]
+            yield msgs, report
+            files = _file_messages(answer, lang or requested_language([message]))
+            if files:  # attached after the answer, so a slow official site never delays the report
+                yield msgs + files, report
             return
         status.metadata["log"] = " → ".join(steps[-3:])
         yield [status, *tools], gr.update(visible=False)
