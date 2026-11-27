@@ -48,10 +48,12 @@ TZ = ZoneInfo("Europe/Zurich")
 
 # Notice periods (calendar days before the start date). Single source of truth:
 # the model no longer chooses this number.
-NOTICE_DAYS = {"F02": 10, "F05": 14, "F08": 14, "F13": 10, "F14": 2, "F15": 7, "F25": 30, "F26": 30}
-WORKING_DAYS = {"F01": 10}  # counted Monday-Friday (public holidays not removed: check them)
-KNOWN_FORMS = {f"F{i:02d}" for i in range(1, 29)}
-FORM_RE = r"F(?:0[1-9]|1\d|2[0-8])"  # F01 to F28
+NOTICE_DAYS = {"F02": 10, "F05": 14, "F08": 14, "F13": 10, "F14": 2, "F15": 7, "F25": 30, "F26": 30, "F30": 8}
+WORKING_DAYS = {"F01": 10, "F29": 14}  # counted Monday-Friday (public holidays not removed: check them)
+# Due on a fixed day of the FOLLOWING month (F31: weather notice by the 5th of the next month).
+NEXT_MONTH_DAY = {"F31": 5}
+KNOWN_FORMS = {f"F{i:02d}" for i in range(1, 33)}
+FORM_RE = r"F(?:0[1-9]|[12]\d|3[0-2])"  # F01 to F32
 
 NUDGE = (
     "Check before finishing: your answer needs tool results you did not get. Call now: {missing}. "
@@ -84,14 +86,17 @@ def calculate_deadline(form_id=None, report_date=None, work_start_date=None, **_
     """Filing deadline for a form. Labelled values, and an error instead of a crash."""
     form_id = str(form_id or "").strip().upper()
     if form_id not in KNOWN_FORMS:
-        return {"form_id": form_id or "unknown", "error": "Unknown form ID. Use an ID from the library (F01 to F28)."}
+        return {"form_id": form_id or "unknown", "error": "Unknown form ID. Use an ID from the library (F01 to F32)."}
     today = _parse_date(report_date)
     if today is None:
         return {"form_id": form_id, "error": "report_date is missing or not a valid date (YYYY-MM-DD)."}
     start = _parse_date(work_start_date)
     if start is None:
         return {"form_id": form_id, "error": "work_start_date is missing or not a valid date (YYYY-MM-DD). Ask the site manager for the exact start date."}
-    if form_id in WORKING_DAYS:
+    if form_id in NEXT_MONTH_DAY:
+        nxt = date(start.year + (start.month == 12), start.month % 12 + 1, NEXT_MONTH_DAY[form_id])
+        notice, deadline = f"by day {NEXT_MONTH_DAY[form_id]} of the following month", nxt
+    elif form_id in WORKING_DAYS:
         notice, deadline, left = f"{WORKING_DAYS[form_id]} working days", start, WORKING_DAYS[form_id]
         while left:
             deadline -= timedelta(days=1)
@@ -271,7 +276,7 @@ TOOL_DECLARATIONS = [
         "parameters": {
             "type": "object",
             "properties": {
-                "form_id": {"type": "string", "description": "Form ID from the library (F01 to F28), e.g. F01, F02, F13"},
+                "form_id": {"type": "string", "description": "Form ID from the library (F01 to F32), e.g. F01, F02, F13"},
                 "report_date": {"type": "string", "description": "Report date (today), format YYYY-MM-DD"},
                 "work_start_date": {"type": "string", "description": "Date the work starts (or occupation date), format YYYY-MM-DD"},
             },
@@ -466,6 +471,33 @@ def detect_language(note):
     return best if scores[best] >= 2 else None
 
 
+# Explicit language requests ("answer in English", "réponds en anglais") win over detection, and stay
+# in force for the rest of the chat until the user asks for another language.
+_LANG_NAMES = {
+    "English": ["english", "anglais", "englisch", "inglese", "inglês", "ingles", "inglés"],
+    "French": ["french", "français", "francais", "französisch", "francese", "francês", "francés"],
+    "German": ["german", "allemand", "deutsch", "tedesco", "alemão", "alemán"],
+    "Italian": ["italian", "italien", "italienisch", "italiano"],
+    "Portuguese": ["portuguese", "portugais", "portugiesisch", "portoghese", "português", "portugués"],
+    "Spanish": ["spanish", "espagnol", "spanisch", "spagnolo", "espanhol", "español", "espanol"],
+}
+_LANG_REQ = re.compile(
+    r"\b(?:in|en|auf|em)\s+(" + "|".join(sorted({n for v in _LANG_NAMES.values() for n in v}, key=len, reverse=True)) + r")\b",
+    re.I)
+
+
+def requested_language(texts):
+    """Language the user explicitly asked for, most recent request first; None if never asked."""
+    for t in reversed(texts):
+        m = None
+        for m in _LANG_REQ.finditer(t.lower()):
+            pass  # keep the last request inside one message
+        if m:
+            word = m.group(1).lower()
+            return next(lang for lang, names in _LANG_NAMES.items() if word in names)
+    return None
+
+
 # Trigger words per form (lower-case, accents kept). Matching any of them makes the form a candidate.
 TRIGGERS = {
     "F01": ["benne", "trottoir", "voie publique", "domaine public", "places de parc", "place de parc", "fermeture de voie",
@@ -508,6 +540,17 @@ TRIGGERS = {
             "new building", "extension", "extra storey", "extra floor", "demolish the building", "building permit"],
     "F27": ["début des travaux", "fin des travaux", "réception de l'ouvrage", "works finished", "handover"],
     "F28": ["macaron", "amende de stationnement", "amendes de stationnement", "parking fine", "parking permit"],
+    "F29": ["blécherette", "blecherette", "héliport", "heliport", "aérodrome", "aerodrome", "airfield", "grue de grande hauteur",
+            "obstacle à la navigation", "tall crane"],
+    "F30": ["travailleurs détachés", "détachés", "sous-traitant français", "sous-traitant étranger", "entreprise étrangère",
+            "main-d'œuvre étrangère", "posted workers", "foreign subcontractor", "french subcontractor", "foreign company",
+            "workers from abroad", "workers from france", "workers from portugal"],
+    "F31": ["intempérie", "intemperie", "arrêté à cause de la pluie", "arrêté à cause de la neige", "arrêté à cause du gel",
+            "arrêt pour la pluie", "trop de pluie", "chantier arrêté", "travaux interrompus", "renvoyé les ouvriers", "canicule",
+            "stopped because of the rain", "stopped because of the snow", "rained out", "sent the crew home", "work stopped due to",
+            "too hot to work", "heatwave"],
+    "F32": ["zone piétonne", "livraison en zone", "hors case", "hors des cases", "décharger en zone", "pedestrian zone",
+            "unload in the old town", "outside a parking bay", "delivery truck in"],
 }
 
 
@@ -600,7 +643,7 @@ def build_contents(message, history, report_date):
     past = _past_turns(history)
     user_texts = [t for r, t in past if r == "user"] + [message]
     all_text = "\n".join(user_texts)
-    lang = detect_language(message) or detect_language(all_text)
+    lang = requested_language(user_texts) or detect_language(message) or detect_language(all_text)
     cands = candidate_forms(all_text)
     outdoor = outdoor_work(all_text)
     hint = ", ".join(f"{f} (\"{w}\")" for f, w in cands.items()) or "none"
@@ -745,6 +788,10 @@ FORM_LINKS = {
     "F26": "https://www.lausanne.ch/prestations/urbanisme/demande-permis-de-construire.html",
     "F27": "https://www.vd.ch/territoire-et-construction/permis-de-construire/les-differentes-etapes-de-la-procedure-du-permis-construire",
     "F28": "https://www.lausanne.ch/macarons-stationnement-entreprises",
+    "F29": "https://www.bazl.admin.ch/fr/obstacles-a-la-navigation-aerienne",
+    "F30": "https://www.sem.admin.ch/content/sem/fr/home/themen/fza_schweiz-eu-efta/meldeverfahren.html",
+    "F31": "https://www.vd.ch/economie/prestations-de-la-direction-generale-de-lemploi-et-du-marche-du-travail-dgem/demande-dindemnite-pour-intemperies",
+    "F32": "https://www.lausanne.ch/prestations/police/autorisation-parquer-hors-cases.html",
 }
 # The actual form to fill in, per form (revision log #21): a document to download, an online form,
 # or - when the authority publishes no form - an email to the right address, pre-filled from the report.
@@ -774,6 +821,9 @@ FORM_FILL = {
     "F25": ("pdf", "https://www.lausanne.ch/dam/jcr:d6cdf7ac-b627-41dc-aa2e-63cdc49b1028/formulaire-demande-de-travaux.pdf"),
     "F26": ("online", "https://www.vd.ch/territoire-et-construction/permis-de-construire/lacces-a-la-plateforme-actis-camac-passe-par-le-portail-securise"),
     "F28": ("online", "https://www.lausanne.ch/de/prestations/police/demande-macaron-pour-entreprises/formulaire-macaron-multizones-entreprises.html"),
+    "F29": ("online", "https://www.bazl.admin.ch/fr/obstacles-a-la-navigation-aerienne"),
+    "F30": ("online", "https://www.sem.admin.ch/content/sem/fr/home/themen/fza_schweiz-eu-efta/meldeverfahren.html"),
+    "F31": ("email", "intemperies.dgem@vd.ch"),
 }
 _KIND = {  # label per kind and language
     "English": {"online": "online form", "pdf": "PDF form", "word": "Word form", "email": "email (pre-filled)", "info": "info page",
@@ -1002,7 +1052,7 @@ def report_api(note: str, report_date: str = "", request: gr.Request = None) -> 
 WELCOME = """
 <div class="cp-welcome">
 <p style="font-size:1.05rem"><b>Send me your end-of-day site note</b>, in any language.<br>
-I'll turn it into a <b>daily log</b>, flag the <b>Lausanne, Vaud and Suva forms</b> it triggers with their deadlines,
+I'll turn it into a <b>daily log</b>, flag the <b>Lausanne, Vaud, Suva and federal forms</b> it triggers with their deadlines,
 and check the <b>weather go / no-go</b> for planned outdoor work.</p>
 <p class="cp-small">You can answer my questions afterwards and I'll update the report.
 To use another report date, start your note with <code>Report date: 2026-11-21</code>.</p>
