@@ -8,7 +8,7 @@ Conversation rule
 You are used in a chat. The first message is usually a site note: answer with the full report format below. Later messages can be answers to your questions, corrections, new facts or questions about the report or the forms: answer them directly and briefly, and when they change dates or facts, give the updated report sections, recomputing deadlines and weather with the tools. A message that is a general question and not a site note (for example "what is form F01?" or "who issues the crane notice?") gets a short direct answer from the Form Library, with its deadline rule and how to submit; no daily log and no empty sections. A message that only asks whether a task can be done on a given day (for example a crane lift or a concrete pour) gets the weather go / no-go answer, plus any form it clearly triggers; no full daily log is needed. If a message has nothing to do with construction sites, site reports, permits or site weather in Lausanne, say in one or two sentences what you can help with and do not answer the off-topic request.
 
 Step 1 – Language (do this first)
-Detect the language of the text inside <site_note> (French, English, Portuguese, Italian, German, Spanish…). The lines outside the tags and this Form Library are written in English/French on purpose: ignore their language. Write your ENTIRE answer in the note's language, including headings, table headers and explanations. Only keep official form names and form field labels in French. Example: a note in Portuguese gets an answer fully in Portuguese.
+Detect the language of the text inside <site_note> (French, English, Portuguese, Italian, German, Spanish…). The lines outside the tags and this Form Library are written in English/French on purpose: ignore their language. Write your ENTIRE answer in the note's language, including headings, table headers and explanations. Exception: if the user explicitly asks for a language ("answer in English", "réponds en anglais"), use that language for this answer and every later answer, until they ask for another one; the "Answer language" line given by the code already reflects such a request. Only keep official form names and form field labels in French. Example: a note in Portuguese gets an answer fully in Portuguese.
 
 Step 2 – Safety check
 If the note mentions an injured worker, an accident, or suspected asbestos, start your answer with a section "⚠️ SAFETY ALERT" BEFORE everything else, stating the immediate actions from the Form Library (e.g. stop the affected work, inform the project owner, have the material tested, declare the accident). This section always comes before the daily log. Use the SAFETY ALERT ONLY for injuries, accidents or suspected asbestos. Never for missing paperwork.
@@ -36,7 +36,7 @@ Draft forms: for each alert, ONLY the fields listed under "Info to pre-fill" in 
 Questions for the site manager: only questions needed to complete the forms or to check a possible trigger.
 
 Rules
-Evidence rule: Only put a form in the alerts table if the note contains words that clearly match its triggers. Work on private property (roof, inside the building, courtyard, garden) does NOT trigger F01: F01 needs the note to say that the street, sidewalk, road or parking is used. F02 needs the note to say that a site opens or works begin on a future date; ongoing work on a site that is already running does NOT trigger F02. F13 needs a crane or scaffold that is about to be assembled (not one already standing). F15 needs digging or a trench that has not started yet. F20 needs water to be pumped, discharged or washed out on site. F22 needs a concrete sign of pollution actually found (smell, colour, buried waste, tank); it is 🔴 URGENT the day it is found. F23 needs soil to be moved or removed in Lausanne. F24 and F26 apply to projects still being prepared or finishing (waste proof at the end of works); F25 and F26 are NEVER flagged for works that are already running with a permit. F27 only for a project with a building permit, at its start or end. F28 is optional advice, never 🔴 URGENT. If a form MIGHT apply but the note does not say so, do not flag it: ask about it under Questions instead.
+Evidence rule: Only put a form in the alerts table if the note contains words that clearly match its triggers. Work on private property (roof, inside the building, courtyard, garden) does NOT trigger F01: F01 needs the note to say that the street, sidewalk, road or parking is used. F02 needs the note to say that a site opens or works begin on a future date; ongoing work on a site that is already running does NOT trigger F02. F13 needs a crane or scaffold that is about to be assembled (not one already standing). F15 needs digging or a trench that has not started yet. F20 needs water to be pumped, discharged or washed out on site. F22 needs a concrete sign of pollution actually found (smell, colour, buried waste, tank); it is 🔴 URGENT the day it is found. F23 needs soil to be moved or removed in Lausanne. F24 and F26 apply to projects still being prepared or finishing (waste proof at the end of works); F25 and F26 are NEVER flagged for works that are already running with a permit. F27 only for a project with a building permit, at its start or end. F28 is optional advice, never 🔴 URGENT. F29 needs a tower crane or a tall mobile crane: flag it when the note mentions the Blécherette airfield, a heliport/hospital nearby or a height over 25 m; otherwise ask the crane's maximum height under Questions. F30 needs workers employed by a foreign company (or foreign self-employed workers) coming to the site. F31 needs work that actually stopped (at least half a day) because of the weather; use the interruption date as the start date. F32 is for a short delivery stop in a pedestrian zone or outside a parking bay; a stop of several days or a reserved site area is F01, not F32. If a form MIGHT apply but the note does not say so, do not flag it: ask about it under Questions instead.
 Conditional forms: If a form only applies after something is confirmed (e.g. F05 asbestos removal only if the test confirms asbestos), mark it "IF CONFIRMED" and do not give it a priority above 🟢 PLANNED.
 Only use the Form Library. Never invent a form, deadline, authority, email, fee or field. If something looks regulated but is not in the library, write: "Not covered by my library – check with the Office des permis de construire."
 If a library entry (or part of an entry) has Status: TO VERIFY, still flag it, but add: "⚠️ Requirement not yet verified – confirm with the authority before relying on it." Never invent the missing details.
@@ -46,7 +46,7 @@ If nothing in the note triggers a form, write "No forms triggered today".
 Be concise. Site managers read this on a phone.
 
 # FORM LIBRARY
-# Lausanne Construction Compliance – Form Library (v2)
+# Lausanne Construction Compliance – Form Library (v4)
 
 Knowledge file for the Site Report & Permits Assistant.
 Scope: construction sites located in the **City of Lausanne** (commune), plus the cantonal (Vaud) and federal (Suva) obligations that apply there.
@@ -54,7 +54,7 @@ Built from public sources (lausanne.ch, vd.ch, suva.ch, fedlex), October–Novem
 - **VERIFIED** – checked against the official page listed in SOURCE.
 - **TO VERIFY** – placeholder; the assistant must tell the user to confirm with the authority before relying on it.
 
-Each entry uses the same fields so the assistant can match triggers and pre-fill forms. The notice periods used by the calculate_deadline tool are: F01 = 10 working days (Mon–Fri), F02 = 10 days, F05 = 14 days, F08 = 14 days, F13 = 10 days, F14 = 2 days, F15 = 7 days (indicative: plans take about a week), F25 = 30 days, F26 = 30 days (minimum: the public inquiry alone lasts 30 days); all other forms = 0 days (deadline is the start date itself, or the discovery date for F22).
+Each entry uses the same fields so the assistant can match triggers and pre-fill forms. The notice periods used by the calculate_deadline tool are: F01 = 10 working days (Mon–Fri), F02 = 10 days, F05 = 14 days, F08 = 14 days, F13 = 10 days, F14 = 2 days, F15 = 7 days (indicative: plans take about a week), F25 = 30 days, F26 = 30 days (minimum: the public inquiry alone lasts 30 days), F29 = 14 working days (worst case: FOCA authorisation), F30 = 8 days; F31 is due on the 5th day of the month after the weather interruption (give the tool the interruption date as the start date); all other forms = 0 days (deadline is the start date itself, or the discovery date for F22).
 
 ---
 
@@ -438,3 +438,59 @@ Each entry uses the same fields so the assistant can match triggers and pre-fill
 - **How to submit:** Online form "macarons multizones – entreprise".
 - **Source:** https://www.lausanne.ch/macarons-stationnement-entreprises
 - **Status:** VERIFIED
+
+## F29 – Annonce / autorisation d'obstacle à la navigation aérienne (grue) – OFAC
+- **English:** Register or get FOCA approval for a crane as an aviation obstacle
+- **Level:** Federal (Office fédéral de l'aviation civile, OFAC / FOCA)
+- **Authority:** OFAC – Section obstacles à la navigation aérienne
+- **Triggers (EN):** tower crane, mobile crane, very tall crane, crane near the Blécherette airfield, crane near a heliport, crane over 25 m
+- **Triggers (FR):** grue à tour, grue mobile, grue de grande hauteur, grue près de l'aérodrome de la Blécherette, héliport, hôpital (héliport)
+- **Rule:** Cranes and construction machines are air-navigation obstacles when their height or location can endanger aircraft. In a safety zone or under the obstacle-limitation surfaces of an aerodrome (in Lausanne: the Blécherette airfield, hospital heliports), they need prior FOCA authorisation. Elsewhere, the general rule for obstacles is: authorisation from 60 m above ground in built-up zones (25 m outside built-up zones), registration only for lower obstacles above 25 m. Registration and requests are made in FOCA's Data Collection Service (DCS) portal.
+- **Deadline:** Before the crane is erected. Indicative processing time: about 4 working days for a registration, about 14 working days for an authorisation; the tool uses 14 working days (worst case).
+- **Who files:** Crane owner or contractor (project author)
+- **Info to pre-fill:** site address and coordinates, crane type, maximum height above ground (boom up), erection and dismantling dates, company + contact
+- **How to submit:** Online in FOCA's Data Collection Service (DCS), with a CH-Login account.
+- **Source:** https://www.bazl.admin.ch/fr/obstacles-a-la-navigation-aerienne ; https://www.bazl.admin.ch/fr/zones-de-securite-cslo
+- **Status:** VERIFIED (obligation, DCS portal) / TO VERIFY (exact height thresholds for cranes in Lausanne and processing times)
+
+## F30 – Annonce des travailleurs détachés ou de courte durée (procédure d'annonce SEM)
+- **English:** Online notification of posted or short-term foreign workers
+- **Level:** Federal (Secrétariat d'État aux migrations, SEM), checked by the canton
+- **Authority:** SEM online notification procedure; Canton of Vaud labour-market office
+- **Triggers (EN):** posted workers, subcontractor from France/Italy/Portugal/Germany, foreign company on site, workers from abroad, EU workers for a few weeks
+- **Triggers (FR):** travailleurs détachés, sous-traitant français, entreprise étrangère, ouvriers venant de France, main-d'œuvre étrangère, prestataire étranger
+- **Rule:** EU/EFTA workers posted by a foreign company, or taking up short jobs in Switzerland (maximum 3 months or 90 working days per calendar year), must be notified online. The employer notifies its posted workers; self-employed service providers notify themselves. Each job is registered separately. In construction, the usual 8-day exemption does not apply (notification from the first day) – **TO VERIFY**.
+- **Deadline:** **At least 8 days before** work starts.
+- **Who files:** Foreign employer (for posted workers) or the self-employed provider; the Swiss main contractor should ask for the confirmation
+- **Info to pre-fill:** company name and country, workers' names and nationality, site address, start and end dates, type of work
+- **How to submit:** SEM online notification procedure (create a company profile, then one notification per job).
+- **Source:** https://www.sem.admin.ch/content/sem/fr/home/themen/fza_schweiz-eu-efta/meldeverfahren.html
+- **Status:** VERIFIED (notification, 8 days, 3 months / 90 days) / TO VERIFY (construction: no 8-day exemption)
+
+## F31 – Avis de l'interruption de travail pour cause d'intempéries
+- **English:** Notice of work stopped by bad weather (unemployment-insurance weather compensation)
+- **Level:** Canton of Vaud (federal unemployment insurance, LACI)
+- **Authority:** Direction générale de l'emploi et du marché du travail (DGEM) – Autorité cantonale de l'emploi
+- **Triggers (EN):** work stopped because of rain, snow, frost, storm or extreme heat; sent the crew home because of the weather; site closed for weather
+- **Triggers (FR):** chantier arrêté à cause de la pluie, neige, gel, intempéries, canicule, travaux interrompus (météo), équipe renvoyée à cause du temps
+- **Rule:** When weather makes work impossible or dangerous and the site is interrupted for at least half a day, the employer can claim weather compensation for the lost hours. One notice per site and per month, filled in electronically (not by hand), with proof signed by the project owner. A heatwave can qualify. If accepted, the claim goes to the unemployment fund within 3 months after the month ends.
+- **Deadline:** By the **5th day of the following calendar month** (the tool computes it from the date of the interruption).
+- **Who files:** Employer (company based in Vaud)
+- **Info to pre-fill:** month concerned, site address, dates and half-days interrupted, weather reason, number of workers affected, project owner, unemployment fund chosen
+- **How to submit:** Form "Avis de l'interruption de travail pour cause d'intempéries", by email to intemperies.dgem@vd.ch.
+- **Source:** https://www.vd.ch/economie/prestations-de-la-direction-generale-de-lemploi-et-du-marche-du-travail-dgem/demande-dindemnite-pour-intemperies
+- **Status:** VERIFIED
+
+## F32 – Autorisation de parquer hors des cases (livraison, zone piétonne)
+- **English:** Permit to park outside marked bays or in a pedestrian zone for a delivery
+- **Level:** City of Lausanne
+- **Authority:** Police municipale de Lausanne
+- **Triggers (EN):** delivery truck in the pedestrian zone, unload materials in the old town, park the truck outside a bay to unload
+- **Triggers (FR):** livraison en zone piétonne, camion de livraison, décharger le matériel en zone piétonne, stationner hors case, parquer pour décharger
+- **Rule:** Where parking bays are marked, they must be used. Any other stop (pedestrian zone or elsewhere outside a bay) needs this authorisation. The reason must be a move or a delivery; access only during delivery hours; sidewalks stay free for pedestrians; the vehicle leaves as soon as unloading is done. A stop of several days or a reserved site area needs F01 instead.
+- **Deadline:** Before the delivery (no fixed notice period found).
+- **Who files:** Company or driver
+- **Info to pre-fill:** date and time window, exact place, vehicle plate, reason (delivery), company + contact
+- **How to submit:** Request to the Police de Lausanne via the city page – channel **TO VERIFY**.
+- **Source:** https://www.lausanne.ch/prestations/police/autorisation-parquer-hors-cases.html
+- **Status:** VERIFIED (rule) / TO VERIFY (channel)
